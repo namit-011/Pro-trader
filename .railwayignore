@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+backend_err.txt
+err_msg.txt
+test_output.txt
+.git/
