@@ -280,7 +280,7 @@ function CountryModal({ modal, onClose }) {
 // ── App ──
 export default function App() {
     // Views: geopulse | terminal | signals
-    const [activeView, setActiveView] = useState('geopulse');
+    const [activeView, setActiveView] = useState('terminal');
 
     // GTI
     const [gti, setGti]           = useState({ score: 58, delta: 0, level: 'MEDIUM', events: [] });

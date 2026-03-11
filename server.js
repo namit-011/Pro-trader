@@ -1,11 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const compression = require('compression');
 const YahooFinance = require('yahoo-finance2').default;
 const yahooFinance = new YahooFinance(); // Corrected instantiation
 const { SMA, EMA, MACD, RSI, BollingerBands, Stochastic, ADX } = require('technicalindicators');
 
 const app = express();
+app.use(compression());
 app.use(cors());
 app.use(express.json());
 
@@ -866,11 +868,28 @@ app.get('/api/country/:iso', async (req, res) => {
 
 // Serve React build in production
 if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.join(__dirname, 'dist')));
+    // Cache static assets for 7 days (hashed filenames change on rebuild)
+    app.use(express.static(path.join(__dirname, 'dist'), {
+        maxAge: '7d',
+        immutable: true,
+        setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+        }
+    }));
     app.use((req, res) => {
         res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`ProTrader API Live on ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`ProTrader API Live on ${PORT}`);
+    // Pre-warm caches in background so first user gets fast response
+    setTimeout(() => {
+        fetch(`http://localhost:${PORT}/api/gti`).catch(() => {});
+        fetch(`http://localhost:${PORT}/api/news`).catch(() => {});
+        fetch(`http://localhost:${PORT}/api/futures`).catch(() => {});
+        fetch(`http://localhost:${PORT}/api/indicesbar`).catch(() => {});
+        fetch(`http://localhost:${PORT}/api/livetape`).catch(() => {});
+    }, 3000);
+});
