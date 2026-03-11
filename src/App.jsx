@@ -280,7 +280,7 @@ function CountryModal({ modal, onClose }) {
 // ── App ──
 export default function App() {
     // Views: geopulse | terminal | signals
-    const [activeView, setActiveView] = useState('terminal');
+    const [activeView, setActiveView] = useState('home');
 
     // GTI
     const [gti, setGti]           = useState({ score: 58, delta: 0, level: 'MEDIUM', events: [] });
@@ -517,7 +517,7 @@ export default function App() {
 
             {/* ── HEADER ── */}
             <header className="geo-header">
-                <div className="gh-logo">
+                <div className="gh-logo" onClick={() => setActiveView('home')} style={{ cursor: 'pointer' }}>
                     <div className="gh-logo-icon">◈</div>
                     <div>
                         <div className="gh-logo-name">ProTrader<span className="gh-acc">AI</span></div>
@@ -573,6 +573,65 @@ export default function App() {
 
             {/* ── MAIN ── */}
             <div className="geo-main">
+
+                {/* ════ HOME VIEW ════ */}
+                {activeView === 'home' && (
+                    <div className="home-view">
+                        <div className="home-hero">
+                            <div className="home-logo-icon">◈</div>
+                            <div className="home-title">ProTrader<span>AI</span></div>
+                            <div className="home-subtitle">Geo Intelligence · Real-Time Markets · v2.0</div>
+                            <div className="home-tagline">AI-powered stock analysis, global risk intelligence, and live Indian market data — all in one terminal.</div>
+                        </div>
+
+                        <div className="home-stats">
+                            {[
+                                { val: indicesBar.length || '20+', lbl: 'NSE Indices' },
+                                { val: signals.length || '—', lbl: 'AI Signals' },
+                                { val: news.length || '—', lbl: 'News Stories' },
+                                { val: gtiScore, lbl: 'GTI Score' },
+                            ].map(s => (
+                                <div key={s.lbl} className="home-stat">
+                                    <div className="home-stat-val">{s.val}</div>
+                                    <div className="home-stat-lbl">{s.lbl}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="home-cards">
+                            {[
+                                { icon: '⊕', title: 'Earth Pulse', desc: 'Globe view with country risk scores, live news feed, and global market intelligence.', view: 'geopulse' },
+                                { icon: '⊞', title: 'Terminal', desc: 'Deep stock analysis — charts, technicals, financials, options chain, and AI signals.', view: 'terminal' },
+                                { icon: '⊿', title: 'AI Signals', desc: 'GTI-adjusted buy/sell/hold signals with Black-Scholes model for Indian & global stocks.', view: 'signals' },
+                            ].map(c => (
+                                <div key={c.view} className="home-card" onClick={() => setActiveView(c.view)}>
+                                    <div className="home-card-icon">{c.icon}</div>
+                                    <div className="home-card-title">{c.title}</div>
+                                    <div className="home-card-desc">{c.desc}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {news.length > 0 && (
+                            <div className="home-news">
+                                <div className="home-news-title">Live Market News</div>
+                                <div className="home-news-list">
+                                    {news.slice(0, 8).map((n, i) => (
+                                        <a key={i} href={n.link} target="_blank" rel="noreferrer"
+                                            className={`home-news-item${n.highImpact ? ' hi' : ''}`}>
+                                            <div className="home-ni-top">
+                                                <span className="home-ni-sent" style={{ color: sentColor(n.sentiment) }}>{sentLabel(n.sentiment)}</span>
+                                                <span className="home-ni-time">{n.time}</span>
+                                            </div>
+                                            <div className="home-ni-title">{n.title}</div>
+                                            <div className="home-ni-pub">{n.publisher}</div>
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* ════ GEO PULSE VIEW ════ */}
                 {activeView === 'geopulse' && (
@@ -1138,6 +1197,21 @@ export default function App() {
                     <span className="ib-gti-lvl">{gtiLvl}</span>
                 </div>
             </div>
+
+            {/* ── MOBILE BOTTOM NAV ── */}
+            <nav className="mobile-nav">
+                {[
+                    { view: 'home',      icon: '⌂', label: 'Home' },
+                    { view: 'geopulse', icon: '⊕', label: 'Earth' },
+                    { view: 'terminal', icon: '⊞', label: 'Terminal' },
+                    { view: 'signals',  icon: '⊿', label: 'Signals' },
+                ].map(({ view, icon, label }) => (
+                    <button key={view} className={activeView === view ? 'active' : ''} onClick={() => setActiveView(view)}>
+                        <span className="mn-icon">{icon}</span>
+                        {label}
+                    </button>
+                ))}
+            </nav>
         </div>
     );
 }

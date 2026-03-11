@@ -250,6 +250,15 @@ async function fetchRSS(url, max = 20) {
     return items.sort((a, b) => b.ts - a.ts);
 }
 
+const RSS_SOURCES = [
+    { url: 'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms', pub: 'Economic Times' },
+    { url: 'https://www.moneycontrol.com/rss/latestnews.xml', pub: 'MoneyControl' },
+    { url: 'https://www.livemint.com/rss/markets', pub: 'Livemint' },
+    { url: 'https://www.business-standard.com/rss/markets-106.rss', pub: 'Business Standard' },
+    { url: 'https://feeds.feedburner.com/ndtvprofit-latest', pub: 'NDTV Profit' },
+    { url: 'https://zeenews.india.com/business/rss.xml', pub: 'Zee Business' },
+];
+
 let rssCache = { data: null, ts: 0 };
 const RSS_TTL = 90000; // 90s
 
@@ -322,11 +331,15 @@ const mapNewsItem = (title, link, publisher, timestamp) => ({
 app.get('/api/globalnews', async (req, res) => {
     const now = Date.now();
     try {
-        // RSS primary source (Economic Times Markets — updated every ~5 min)
+        // Multi-source RSS (all sources in parallel)
         const getRSS = async () => {
             if (rssCache.data && now - rssCache.ts < RSS_TTL) return rssCache.data;
-            const items = await fetchRSS('https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms', 25);
-            const mapped = items.map(i => mapNewsItem(i.title, i.link, 'Economic Times', i.ts));
+            const results = await Promise.allSettled(
+                RSS_SOURCES.map(s => fetchRSS(s.url, 15).then(items =>
+                    items.map(i => mapNewsItem(i.title, i.link, s.pub, i.ts))
+                ))
+            );
+            const mapped = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
             rssCache = { data: mapped, ts: now };
             return mapped;
         };
@@ -334,8 +347,8 @@ app.get('/api/globalnews', async (req, res) => {
         // Yahoo Finance secondary source
         const getYF = async () => {
             const searches = await Promise.all(
-                ['RELIANCE.NS', 'TCS.NS', '^NSEI', 'HDFCBANK.NS'].map(sym =>
-                    yahooFinance.search(sym, { newsCount: 6 }).catch(() => ({ news: [] }))
+                ['RELIANCE.NS', 'TCS.NS', '^NSEI', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS'].map(sym =>
+                    yahooFinance.search(sym, { newsCount: 5 }).catch(() => ({ news: [] }))
                 )
             );
             const seen = new Set();
@@ -361,7 +374,7 @@ app.get('/api/globalnews', async (req, res) => {
                 seen.add(key); return true;
             })
             .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-            .slice(0, 28);
+            .slice(0, 50);
 
         res.json(merged);
     } catch { res.json([]); }
