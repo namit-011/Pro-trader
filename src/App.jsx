@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as LightweightCharts from 'lightweight-charts';
 
-const API = 'http://localhost:3000/api';
+const API = '/api';
 
 // ── Helpers ──
 const fmt = (n, d = 2) => (n != null && !isNaN(n)) ? Number(n).toFixed(d) : 'N/A';
