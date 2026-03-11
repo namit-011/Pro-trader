@@ -1,0 +1,34 @@
+{
+  "name": "stock-analyzer-app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "frontend": "vite",
+    "backend": "node server.js",
+    "build": "vite build",
+    "start": "NODE_ENV=production node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "concurrently": "^9.2.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "globe.gl": "^2.45.0",
+    "lightweight-charts": "^5.1.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "technicalindicators": "^3.1.0",
+    "yahoo-finance2": "^3.13.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.4",
+    "vite": "^7.3.1"
+  }
+}

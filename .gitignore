@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+*.log
+backend_err.txt
+err_msg.txt
+test_output.txt
