@@ -2,14 +2,31 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const YahooFinance = require('yahoo-finance2').default;
 const yahooFinance = new YahooFinance(); // Corrected instantiation
 const { SMA, EMA, MACD, RSI, BollingerBands, Stochastic, ADX } = require('technicalindicators');
 
 const app = express();
+
+// Security Middlewares
+app.use(helmet({
+    contentSecurityPolicy: false, // Turn off CSP if it interferes with React dev server or external APIs in this simple app
+    crossOriginEmbedderPolicy: false
+}));
+
+// Rate Limiting
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 200, // limit each IP to 200 requests per windowMs
+    message: { error: 'Too many requests, please try again later.' }
+});
+
 app.use(compression());
 app.use(cors());
 app.use(express.json());
+app.use('/api/', apiLimiter);
 
 // ── Helpers ──
 const getRelativeTime = (dateInput) => {
@@ -491,85 +508,152 @@ app.get('/api/analyze/:ticker', async (req, res) => {
         const { ticker } = req.params;
         let { period = '6mo', interval = '1d' } = req.query;
 
-        const rangeKey = interval.includes('m') || interval === '1h' ? '1d' : (period || '6mo');
-        let params = { interval, period1: toPeriod1(rangeKey) };
-
         const sym = ticker.toUpperCase();
-        const [quote, summary, chart] = await Promise.all([
+        const isIntraday = interval.includes('m') || interval === '1h';
+        // For intraday: fetch 5d so MACD (26+) always has enough candles
+        const intradayRange = interval === '1m' ? '2d' : '5d';
+        const mainRangeKey  = isIntraday ? intradayRange : (period || '6mo');
+        const params = { interval, period1: toPeriod1(mainRangeKey) };
+
+        // Fetch: main chart + daily chart + quote + summary + news + 1y weekly chart (for 52w h/l)
+        const [quote, summary, chart, dailyChart, searchRes, weekly1yChart] = await Promise.all([
             yahooFinance.quote(sym).catch(() => ({})),
             yahooFinance.quoteSummary(sym, { modules: ['summaryDetail', 'financialData', 'defaultKeyStatistics'] }).catch(() => ({})),
-            yahooFinance.chart(sym, params).catch(() => ({ quotes: [] }))
+            yahooFinance.chart(sym, params).catch(() => ({ quotes: [] })),
+            // Always fetch last 5 daily candles for pivot/prev-day context
+            yahooFinance.chart(sym, { interval: '1d', period1: toPeriod1('5d') }).catch(() => ({ quotes: [] })),
+            yahooFinance.search(sym, { newsCount: 15 }).catch(() => ({ news: [] })),
+            yahooFinance.chart(sym, { interval: '1wk', range: '1y' }).catch(() => ({ quotes: [] }))
         ]);
 
         const q = (chart?.quotes || []).filter(x => x && x.close != null);
+        const dq = (dailyChart?.quotes || []).filter(x => x && x.close != null); // daily candles
+
         const price = quote.regularMarketPrice || (q.length ? q[q.length - 1].close : 0);
 
+        // ── Supplement missing quote fields from chart data ──
+        // For NSE indices Yahoo often returns 0 for dayHigh/dayLow — use chart data instead
+        const todayCandles = q;
+        const chartDayHigh = todayCandles.length ? Math.max(...todayCandles.map(x => x.high).filter(Boolean)) : 0;
+        const chartDayLow  = todayCandles.length ? Math.min(...todayCandles.map(x => x.low).filter(v => v > 0)) : 0;
+        // Previous day OHLC from daily chart (second-to-last candle)
+        const prevDayCandle = dq.length >= 2 ? dq[dq.length - 2] : dq.length === 1 ? dq[0] : null;
+
+        const dayHigh    = quote.regularMarketDayHigh  || chartDayHigh  || null;
+        const dayLow     = quote.regularMarketDayLow   || chartDayLow   || null;
+        const prevClose  = quote.regularMarketPreviousClose || prevDayCandle?.close || null;
+        const openPrice  = quote.regularMarketOpen     || (todayCandles[0]?.open) || null;
+        
+        let wkHigh52   = quote.fiftyTwoWeekHigh      || null;
+        let wkLow52    = quote.fiftyTwoWeekLow       || null;
+        if ((!wkHigh52 || !wkLow52) && weekly1yChart?.quotes?.length) {
+            const wQuotes = weekly1yChart.quotes.filter(x => x && x.high != null && x.low != null);
+            if (wQuotes.length) {
+                wkHigh52 = Math.max(...wQuotes.map(q => q.high));
+                wkLow52 = Math.min(...wQuotes.map(q => q.low));
+            }
+        }
+
+        // ── Volume spike detection ──
+        const volumes = q.map(x => x.volume || 0).filter(v => v > 0);
+        const avgVol10 = volumes.length > 2
+            ? volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1)
+            : 0;
+        const lastVol = volumes[volumes.length - 1] || 0;
+        const volSpikeRatio = avgVol10 > 0 ? +(lastVol / avgVol10).toFixed(2) : null;
+        const volSpike = volSpikeRatio != null && volSpikeRatio >= 1.5;
+
+        // ── Technicals ──
         let tech = null;
         if (q.length > 5) {
             const cl = q.map(x => x.close), hi = q.map(x => x.high), lo = q.map(x => x.low);
-            const cp = cl[cl.length - 1], hp = hi[hi.length - 1], lp = lo[lo.length - 1];
-            const P = (hp + lp + cp) / 3;
-            const rsi = q.length >= 14 ? RSI.calculate({ values: cl, period: 14 }).pop() : null;
+
+            // Proper pivot: use PREVIOUS DAY's H/L/C (not current candle)
+            const pivH = prevDayCandle?.high  || hi[hi.length - 1];
+            const pivL = prevDayCandle?.low   || lo[lo.length - 1];
+            const pivC = prevDayCandle?.close || cl[cl.length - 1];
+            const P = (pivH + pivL + pivC) / 3;
+
+            const rsi  = q.length >= 14 ? RSI.calculate({ values: cl, period: 14 }).pop() : null;
             const macd = q.length >= 26 ? MACD.calculate({ values: cl, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }).pop() : null;
-            const bb = q.length >= 20 ? BollingerBands.calculate({ values: cl, period: 20, stdDev: 2 }).pop() : null;
-            const adx = q.length >= 14 ? ADX.calculate({ high: hi, low: lo, close: cl, period: 14 }).pop() : null;
+            const bb   = q.length >= 20 ? BollingerBands.calculate({ values: cl, period: 20, stdDev: 2 }).pop() : null;
+            const adx  = q.length >= 14 ? ADX.calculate({ high: hi, low: lo, close: cl, period: 14 }).pop() : null;
+
+            // VWAP (intraday only — sum(price*vol) / sum(vol))
+            let vwap = null;
+            if (isIntraday && volumes.length > 0) {
+                const totalPV = q.reduce((s, x) => s + ((x.high + x.low + x.close) / 3) * (x.volume || 0), 0);
+                const totalV  = q.reduce((s, x) => s + (x.volume || 0), 0);
+                vwap = totalV > 0 ? +(totalPV / totalV).toFixed(2) : null;
+            }
+
             tech = {
-                rsi,
+                rsi: rsi != null ? +rsi.toFixed(2) : null,
                 macd,
-                ema9: q.length >= 9 ? EMA.calculate({ values: cl, period: 9 }).pop() : null,
-                ema21: q.length >= 21 ? EMA.calculate({ values: cl, period: 21 }).pop() : null,
-                sma50: q.length >= 50 ? EMA.calculate({ values: cl, period: 50 }).pop() : null,
-                sma200: q.length >= 200 ? SMA.calculate({ values: cl, period: 200 }).pop() : null,
+                ema9:  q.length >= 9   ? +EMA.calculate({ values: cl, period: 9 }).pop().toFixed(2)   : null,
+                ema21: q.length >= 21  ? +EMA.calculate({ values: cl, period: 21 }).pop().toFixed(2)  : null,
+                sma50: q.length >= 50  ? +SMA.calculate({ values: cl, period: 50 }).pop().toFixed(2)  : null,
+                sma200:q.length >= 200 ? +SMA.calculate({ values: cl, period: 200 }).pop().toFixed(2) : null,
                 stochastic: q.length >= 14 ? Stochastic.calculate({ high: hi, low: lo, close: cl, period: 14, signalPeriod: 3 }).pop() : null,
-                bb,
-                adx,
-                pivots: { pivot: P, r1: 2 * P - lp, s1: 2 * P - hp, r2: P + (hp - lp), s2: P - (hp - lp) }
+                bb, adx, vwap,
+                pivots: { pivot: +P.toFixed(2), r1: +(2*P - pivL).toFixed(2), s1: +(2*P - pivH).toFixed(2), r2: +(P + (pivH-pivL)).toFixed(2), s2: +(P - (pivH-pivL)).toFixed(2) },
+                prevDayH: prevDayCandle?.high  || null,
+                prevDayL: prevDayCandle?.low   || null,
+                prevDayC: prevDayCandle?.close || null,
+                volSpike, volSpikeRatio,
+                candleCount: q.length,
             };
         }
 
         const det = summary.summaryDetail || {}, f = summary.financialData || {}, ks = summary.defaultKeyStatistics || {};
         const fmtCap = v => v >= 1e12 ? (v/1e12).toFixed(2)+'T' : v >= 1e9 ? (v/1e9).toFixed(2)+'B' : v >= 1e6 ? (v/1e6).toFixed(2)+'M' : String(v);
+
         res.json({
             ticker: sym, companyName: quote.shortName || sym, price,
-            change: quote.regularMarketChange || 0, changePercent: quote.regularMarketChangePercent || 0,
-            volume: quote.regularMarketVolume || 0, openPrice: quote.regularMarketOpen || 0,
-            dayHigh: quote.regularMarketDayHigh || 0, dayLow: quote.regularMarketDayLow || 0,
-            prevClose: quote.regularMarketPreviousClose || 0,
-            fiftyTwoWeekHigh: quote.fiftyTwoWeekHigh || 0, fiftyTwoWeekLow: quote.fiftyTwoWeekLow || 0,
-            avgVolume: quote.averageDailyVolume3Month || 0,
+            change: quote.regularMarketChange || 0,
+            changePercent: quote.regularMarketChangePercent || 0,
+            volume: quote.regularMarketVolume || lastVol || null,
+            openPrice, dayHigh, dayLow, prevClose,
+            fiftyTwoWeekHigh: wkHigh52, fiftyTwoWeekLow: wkLow52,
+            avgVolume: quote.averageDailyVolume3Month || null,
+            volSpike, volSpikeRatio,
             currency: quote.currency || 'INR',
+            isIndex: sym.startsWith('^'),
             financials: {
-                'Market Cap': det.marketCap ? fmtCap(det.marketCap) : 'N/A',
-                'P/E Ratio': det.trailingPE ? Number(det.trailingPE).toFixed(2) : 'N/A',
-                'EPS (TTM)': ks.trailingEps ? Number(ks.trailingEps).toFixed(2) : 'N/A',
-                'Revenue': f.totalRevenue ? fmtCap(f.totalRevenue) : 'N/A',
-                'Profit Margin': f.profitMargins ? (f.profitMargins*100).toFixed(2)+'%' : 'N/A',
-                'ROE': f.returnOnEquity ? (f.returnOnEquity*100).toFixed(2)+'%' : 'N/A',
-                'Debt/Equity': f.debtToEquity ? Number(f.debtToEquity).toFixed(2) : 'N/A',
-                'Div Yield': det.dividendYield ? (det.dividendYield*100).toFixed(2)+'%' : 'N/A',
-                'Beta': det.beta ? Number(det.beta).toFixed(2) : 'N/A',
-                '52W High': quote.fiftyTwoWeekHigh ? Number(quote.fiftyTwoWeekHigh).toFixed(2) : 'N/A',
-                '52W Low': quote.fiftyTwoWeekLow ? Number(quote.fiftyTwoWeekLow).toFixed(2) : 'N/A',
-                'Avg Volume': quote.averageDailyVolume3Month ? fmtCap(quote.averageDailyVolume3Month) : 'N/A',
+                'Market Cap':    det.marketCap     ? fmtCap(det.marketCap)                    : 'N/A',
+                'P/E Ratio':     det.trailingPE    ? Number(det.trailingPE).toFixed(2)         : 'N/A',
+                'EPS (TTM)':     ks.trailingEps    ? Number(ks.trailingEps).toFixed(2)         : 'N/A',
+                'Revenue':       f.totalRevenue    ? fmtCap(f.totalRevenue)                    : 'N/A',
+                'Profit Margin': f.profitMargins   ? (f.profitMargins*100).toFixed(2)+'%'      : 'N/A',
+                'ROE':           f.returnOnEquity  ? (f.returnOnEquity*100).toFixed(2)+'%'     : 'N/A',
+                'Debt/Equity':   f.debtToEquity    ? Number(f.debtToEquity).toFixed(2)         : 'N/A',
+                'Div Yield':     det.dividendYield ? (det.dividendYield*100).toFixed(2)+'%'    : 'N/A',
+                'Beta':          det.beta          ? Number(det.beta).toFixed(2)               : 'N/A',
+                '52W High':      wkHigh52          ? Number(wkHigh52).toFixed(2)               : 'N/A',
+                '52W Low':       wkLow52           ? Number(wkLow52).toFixed(2)                : 'N/A',
+                'Avg Volume':    quote.averageDailyVolume3Month ? fmtCap(quote.averageDailyVolume3Month) : 'N/A',
+                'Prev Day H':    prevDayCandle?.high  ? Number(prevDayCandle.high).toFixed(2)  : 'N/A',
+                'Prev Day L':    prevDayCandle?.low   ? Number(prevDayCandle.low).toFixed(2)   : 'N/A',
+                'Prev Day C':    prevDayCandle?.close ? Number(prevDayCandle.close).toFixed(2) : 'N/A',
             },
             technicals: tech,
             recommendation: (() => {
-                let score = 0, signals = 0;
+                let score = 0, sigs = 0;
                 const rsi = tech?.rsi;
-                if (rsi != null) { signals += 2; score += rsi < 35 ? 2 : rsi > 70 ? -2 : rsi < 50 ? 1 : -1; }
-                if (tech?.macd) { signals++; score += tech.macd.MACD > tech.macd.signal ? 1 : -1; }
-                if (tech?.ema9 && tech?.ema21) { signals++; score += tech.ema9 > tech.ema21 ? 1 : -1; }
-                if (tech?.bb && price) { signals++; score += price < tech.bb.lower ? 2 : price > tech.bb.upper ? -2 : 0; }
-                const norm = signals > 0 ? score / signals : 0;
+                if (rsi != null)       { sigs += 2; score += rsi < 35 ? 2 : rsi > 70 ? -2 : rsi < 50 ? 1 : -1; }
+                if (tech?.macd)        { sigs++;    score += tech.macd.MACD > tech.macd.signal ? 1 : -1; }
+                if (tech?.ema9 && tech?.ema21) { sigs++; score += tech.ema9 > tech.ema21 ? 1 : -1; }
+                if (tech?.bb && price) { sigs++;    score += price < tech.bb.lower ? 2 : price > tech.bb.upper ? -2 : 0; }
+                const norm = sigs > 0 ? score / sigs : 0;
                 const action = norm >= 1 ? 'STRONG BUY' : norm >= 0.4 ? 'BUY' : norm <= -1 ? 'STRONG SELL' : norm <= -0.4 ? 'SELL' : 'HOLD';
-                const confidence = Math.min(95, Math.round(55 + Math.abs(norm) * 22));
-                return { action, confidence, targetArea: price * (norm >= 0 ? 1.055 : 1.02), stopLoss: price * (norm >= 0 ? 0.965 : 0.95) };
+                return { action, confidence: Math.min(95, Math.round(55 + Math.abs(norm) * 22)),
+                    targetArea: price * (norm >= 0 ? 1.055 : 1.02), stopLoss: price * (norm >= 0 ? 0.965 : 0.95) };
             })(),
             chartData: q.map(x => ({
-                time: interval.includes('m') ? Math.floor(new Date(x.date).getTime() / 1000) : x.date.toISOString().split('T')[0],
-                open: x.open, high: x.high, low: x.low, close: x.close, volume: x.volume
+                time: isIntraday ? Math.floor(new Date(x.date).getTime() / 1000) : x.date.toISOString().split('T')[0],
+                open: x.open, high: x.high, low: x.low, close: x.close, volume: x.volume || 0
             })),
-            news: (await yahooFinance.search(sym, { newsCount: 5 }).catch(() => ({ news: [] }))).news.map(n => {
+            news: searchRes.news.map(n => {
                 const pubDate = n.providerPublishTime instanceof Date ? n.providerPublishTime : new Date(n.providerPublishTime * 1000);
                 return { title: n.title, link: n.link, publisher: n.publisher, time: getRelativeTime(pubDate), sentiment: dSent(n.title), sectors: dSec(n.title) };
             })

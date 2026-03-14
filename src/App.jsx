@@ -515,7 +515,7 @@ export default function App() {
         const vs = chart.addSeries(LightweightCharts.HistogramSeries, {
             color: '#3b82f6', priceFormat: { type: 'volume' }, priceScaleId: '',
         });
-        vs.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+        vs.priceScale().applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
         cs.setData(data.chartData);
         vs.setData(data.chartData.map(v => ({
             time: v.time, value: v.volume,
@@ -1224,7 +1224,12 @@ export default function App() {
                                                     ['Prev Close', d.prevClose ? fmtCur(d.prevClose, cur) : 'N/A'],
                                                     ['52W High', d.fiftyTwoWeekHigh ? fmtCur(d.fiftyTwoWeekHigh, cur) : 'N/A'],
                                                     ['52W Low', d.fiftyTwoWeekLow ? fmtCur(d.fiftyTwoWeekLow, cur) : 'N/A'],
-                                                    ['Volume', d.volume ? (d.volume / 1e6).toFixed(2) + 'M' : 'N/A'],
+                                                    ['Volume', d.volume ? (
+                                                        <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
+                                                            {(d.volume / 1e6).toFixed(2) + 'M'}
+                                                            {d.volSpike && <span className="ha-badge" style={{padding: '2px 5px', fontSize: '8px', animation: 'pulse 1.5s infinite'}}>SPIKE {d.volSpikeRatio}x</span>}
+                                                        </span>
+                                                    ) : 'N/A'],
                                                     ['Avg Vol', d.avgVolume ? (d.avgVolume / 1e6).toFixed(2) + 'M' : 'N/A'],
                                                 ].map(([l, v]) => (
                                                     <div key={l} className="th-meta-item">

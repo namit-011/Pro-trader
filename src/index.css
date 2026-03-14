@@ -883,6 +883,15 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
     .home-news-title { font-size: 10px; }
     .home-news-item { padding: 9px 12px; }
     .home-ni-title { font-size: 11px; }
+    /* Terminal Fixes */
+    .terminal-view, .app-shell, body, html { overflow-x: hidden; }
+    .term-hero { flex-direction: column; width: 100%; box-sizing: border-box; }
+    .th-left { width: 100%; }
+    .th-meta { flex-wrap: wrap; gap: 6px; }
+    .th-meta-item { min-width: calc(33.33% - 6px); }
+    .th-right { width: 100%; flex-direction: column; margin-top: 10px; }
+    .term-body-split { display: flex; flex-direction: column; width: 100%; }
+    .tbs-left, .tbs-right { width: 100%; box-sizing: border-box; }
 }
 @media (min-width: 601px) {
     .mobile-nav { display: none; }
