@@ -176,8 +176,9 @@ const NSE_HDR = {
 let nseAllIdxCache = { data: null, ts: 0 };
 const NSE_TTL = 3000; // 3s — real-time
 
-// ── Nifty 100 stocks for live tape ──
+// ── NIFTY 500 representative universe for live tape & breadth ──
 const NIFTY100_LIST = [
+    // NIFTY 50
     'RELIANCE.NS','TCS.NS','HDFCBANK.NS','INFY.NS','ICICIBANK.NS','HINDUNILVR.NS','ITC.NS',
     'SBIN.NS','BHARTIARTL.NS','KOTAKBANK.NS','LT.NS','AXISBANK.NS','ASIANPAINT.NS','MARUTI.NS',
     'TITAN.NS','WIPRO.NS','BAJFINANCE.NS','ONGC.NS','NTPC.NS','POWERGRID.NS','SUNPHARMA.NS',
@@ -185,6 +186,17 @@ const NIFTY100_LIST = [
     'TATAMOTORS.NS','TATASTEEL.NS','JSWSTEEL.NS','COALINDIA.NS','GRASIM.NS','DIVISLAB.NS',
     'BPCL.NS','HEROMOTOCO.NS','SBILIFE.NS','HDFCLIFE.NS','NESTLEIND.NS','ADANIPORTS.NS',
     'ULTRACEMCO.NS','INDUSINDBK.NS','APOLLOHOSP.NS','TRENT.NS','BAJAJ-AUTO.NS','SHREECEM.NS',
+    'M&M.NS','UPL.NS','BRITANNIA.NS','TATACONSUM.NS','ADANIENT.NS','HINDALCO.NS',
+    // NIFTY Next 50
+    'DMART.NS','ZOMATO.NS','IRCTC.NS','DLF.NS','HAVELLS.NS','GODREJCP.NS','COLPAL.NS',
+    'MARICO.NS','SIEMENS.NS','TATAPOWER.NS','PIDILITE.NS','MUTHOOTFIN.NS','NAUKRI.NS',
+    'GAIL.NS','IOC.NS','PNB.NS','CANBK.NS','FEDERALBNK.NS','CHOLAFIN.NS','INDUSTOWER.NS',
+    'BEL.NS','NMDC.NS','SAIL.NS','HINDZINC.NS','LUPIN.NS','TORNTPHARM.NS','AUROPHARMA.NS',
+    'GODREJPROP.NS','AMBUJACEM.NS','BIOCON.NS','CONCOR.NS','BANDHANBNK.NS','MPHASIS.NS',
+    'OFSS.NS','PAGEIND.NS','POLYCAB.NS','VEDL.NS','BALKRISIND.NS','SBICARD.NS','ICICIPRULI.NS',
+    // Large/Mid Cap additions
+    'JUBLFOOD.NS','BERGEPAINT.NS','CUMMINSIND.NS','ATGL.NS','MOTHERSON.NS','JKCEMENT.NS',
+    'PGHH.NS','MFSL.NS','ABBOTINDIA.NS','ATUL.NS',
 ];
 
 // Key NSE indices for the bottom bar
@@ -643,32 +655,83 @@ app.get('/api/gti', async (_req, res) => {
     } catch { res.json({ score: 58, delta: 0, level: 'MEDIUM', events: [], ts: Date.now() }); }
 });
 
-// ── AI Signals ──
+// ── AI Signals — Full NIFTY 50 universe ──
 const SIG_STOCKS = [
-    { sym: 'RELIANCE.NS', name: 'Reliance Industries', cls: 'Energy' },
-    { sym: 'TCS.NS', name: 'Tata Consultancy', cls: 'IT' },
-    { sym: 'HDFCBANK.NS', name: 'HDFC Bank', cls: 'Banking' },
-    { sym: 'BAJFINANCE.NS', name: 'Bajaj Finance', cls: 'NBFC' },
-    { sym: 'ICICIBANK.NS', name: 'ICICI Bank', cls: 'Banking' },
-    { sym: 'SBIN.NS', name: 'State Bank of India', cls: 'PSU Banking' },
-    { sym: 'TATAMOTORS.NS', name: 'Tata Motors', cls: 'Auto' },
-    { sym: 'INFY.NS', name: 'Infosys', cls: 'IT' },
-    { sym: 'ADANIENT.NS', name: 'Adani Enterprises', cls: 'Conglomerate' },
-    { sym: 'ONGC.NS', name: 'Oil & Natural Gas', cls: 'Energy' },
-    { sym: 'TATASTEEL.NS', name: 'Tata Steel', cls: 'Metals' },
-    { sym: 'BHARTIARTL.NS', name: 'Bharti Airtel', cls: 'Telecom' },
+    { sym: 'RELIANCE.NS',   name: 'Reliance Industries',     cls: 'Energy'       },
+    { sym: 'TCS.NS',        name: 'Tata Consultancy',        cls: 'IT'           },
+    { sym: 'HDFCBANK.NS',   name: 'HDFC Bank',               cls: 'Banking'      },
+    { sym: 'INFY.NS',       name: 'Infosys',                 cls: 'IT'           },
+    { sym: 'ICICIBANK.NS',  name: 'ICICI Bank',              cls: 'Banking'      },
+    { sym: 'HINDUNILVR.NS', name: 'Hindustan Unilever',      cls: 'FMCG'        },
+    { sym: 'ITC.NS',        name: 'ITC Limited',             cls: 'FMCG'        },
+    { sym: 'SBIN.NS',       name: 'State Bank of India',     cls: 'PSU Banking'  },
+    { sym: 'BHARTIARTL.NS', name: 'Bharti Airtel',           cls: 'Telecom'      },
+    { sym: 'KOTAKBANK.NS',  name: 'Kotak Mahindra Bank',     cls: 'Banking'      },
+    { sym: 'LT.NS',         name: 'Larsen & Toubro',         cls: 'Infrastructure'},
+    { sym: 'AXISBANK.NS',   name: 'Axis Bank',               cls: 'Banking'      },
+    { sym: 'ASIANPAINT.NS', name: 'Asian Paints',            cls: 'Consumer'     },
+    { sym: 'MARUTI.NS',     name: 'Maruti Suzuki',           cls: 'Auto'         },
+    { sym: 'TITAN.NS',      name: 'Titan Company',           cls: 'Consumer'     },
+    { sym: 'BAJFINANCE.NS', name: 'Bajaj Finance',           cls: 'NBFC'         },
+    { sym: 'SUNPHARMA.NS',  name: 'Sun Pharma',              cls: 'Pharma'       },
+    { sym: 'WIPRO.NS',      name: 'Wipro',                   cls: 'IT'           },
+    { sym: 'HCLTECH.NS',    name: 'HCL Technologies',        cls: 'IT'           },
+    { sym: 'BAJAJFINSV.NS', name: 'Bajaj Finserv',           cls: 'NBFC'         },
+    { sym: 'NTPC.NS',       name: 'NTPC Limited',            cls: 'Power'        },
+    { sym: 'POWERGRID.NS',  name: 'Power Grid Corp',         cls: 'Power'        },
+    { sym: 'TECHM.NS',      name: 'Tech Mahindra',           cls: 'IT'           },
+    { sym: 'TATAMOTORS.NS', name: 'Tata Motors',             cls: 'Auto'         },
+    { sym: 'ADANIENT.NS',   name: 'Adani Enterprises',       cls: 'Conglomerate' },
+    { sym: 'TATASTEEL.NS',  name: 'Tata Steel',              cls: 'Metals'       },
+    { sym: 'JSWSTEEL.NS',   name: 'JSW Steel',               cls: 'Metals'       },
+    { sym: 'ONGC.NS',       name: 'Oil & Natural Gas',       cls: 'Energy'       },
+    { sym: 'HINDALCO.NS',   name: 'Hindalco Industries',     cls: 'Metals'       },
+    { sym: 'COALINDIA.NS',  name: 'Coal India',              cls: 'Mining'       },
+    { sym: 'EICHERMOT.NS',  name: 'Eicher Motors',           cls: 'Auto'         },
+    { sym: 'HEROMOTOCO.NS', name: 'Hero MotoCorp',           cls: 'Auto'         },
+    { sym: 'BAJAJ-AUTO.NS', name: 'Bajaj Auto',              cls: 'Auto'         },
+    { sym: 'GRASIM.NS',     name: 'Grasim Industries',       cls: 'Cement'       },
+    { sym: 'CIPLA.NS',      name: 'Cipla',                   cls: 'Pharma'       },
+    { sym: 'DRREDDY.NS',    name: "Dr. Reddy's Labs",        cls: 'Pharma'       },
+    { sym: 'DIVISLAB.NS',   name: "Divi's Laboratories",     cls: 'Pharma'       },
+    { sym: 'NESTLEIND.NS',  name: 'Nestle India',            cls: 'FMCG'        },
+    { sym: 'APOLLOHOSP.NS', name: 'Apollo Hospitals',        cls: 'Healthcare'   },
+    { sym: 'TATACONSUM.NS', name: 'Tata Consumer Products',  cls: 'FMCG'        },
+    { sym: 'ULTRACEMCO.NS', name: 'UltraTech Cement',        cls: 'Cement'       },
+    { sym: 'BPCL.NS',       name: 'Bharat Petroleum',        cls: 'Energy'       },
+    { sym: 'ADANIPORTS.NS', name: 'Adani Ports',             cls: 'Logistics'    },
+    { sym: 'INDUSINDBK.NS', name: 'IndusInd Bank',           cls: 'Banking'      },
+    { sym: 'TRENT.NS',      name: 'Trent',                   cls: 'Retail'       },
+    { sym: 'SBILIFE.NS',    name: 'SBI Life Insurance',      cls: 'Insurance'    },
+    { sym: 'HDFCLIFE.NS',   name: 'HDFC Life Insurance',     cls: 'Insurance'    },
+    { sym: 'SHREECEM.NS',   name: 'Shree Cement',            cls: 'Cement'       },
+    { sym: 'M&M.NS',        name: 'Mahindra & Mahindra',     cls: 'Auto'         },
+    { sym: 'UPL.NS',        name: 'UPL Limited',             cls: 'Agro'         },
+    { sym: 'BRITANNIA.NS',  name: 'Britannia Industries',    cls: 'FMCG'        },
 ];
 
 const CLS_DRIVERS = {
-    'Energy': 'Crude oil geopolitical premium · OPEC+ stance',
-    'IT': 'USD/INR forex impact · US tech earnings cycle',
-    'Banking': 'RBI policy outlook · credit growth momentum',
-    'NBFC': 'RBI liquidity stance · credit spreads widening',
-    'Auto': 'EV transition pressure · input cost inflation',
-    'Conglomerate': 'Multi-sector geo-political exposure',
-    'PSU Banking': 'Govt capex cycle · NPA resolution progress',
-    'Metals': 'China demand proxy · steel tariff risk',
-    'Telecom': 'ARPU expansion · 5G spectrum debt load',
+    'Energy':         'Crude oil geopolitical premium · OPEC+ stance',
+    'IT':             'USD/INR forex impact · US tech earnings cycle',
+    'Banking':        'RBI policy outlook · credit growth momentum',
+    'NBFC':           'RBI liquidity stance · credit spreads widening',
+    'Auto':           'EV transition pressure · input cost inflation',
+    'Conglomerate':   'Multi-sector geo-political exposure',
+    'PSU Banking':    'Govt capex cycle · NPA resolution progress',
+    'Metals':         'China demand proxy · steel tariff risk',
+    'Telecom':        'ARPU expansion · 5G spectrum debt load',
+    'FMCG':           'Rural consumption · inflation pass-through',
+    'Pharma':         'US FDA approvals · API cost pressures',
+    'Healthcare':     'Hospital capex cycle · insurance penetration',
+    'Power':          'Renewable transition · grid capacity expansion',
+    'Cement':         'Infra capex · real estate demand cycle',
+    'Infrastructure': 'Govt capex · PLI scheme momentum',
+    'Consumer':       'Premium consumption · discretionary spend',
+    'Mining':         'Coal demand · domestic energy security',
+    'Insurance':      'Regulatory tailwinds · penetration growth',
+    'Logistics':      'Port capacity · trade flow disruptions',
+    'Retail':         'Organized retail share gain · tier-2 expansion',
+    'Agro':           'Global agri-commodity cycle · kharif season',
 };
 
 let sigCache = null, sigCacheTs = 0;
@@ -691,7 +754,7 @@ app.get('/api/signals', async (_req, res) => {
         const signals = SIG_STOCKS.map(({ sym, name, cls }, i) => {
             const q = qMap[sym] || {};
             const cr = charts[i];
-            let rsi = 50, closes = [];
+            let rsi = 50, closes = [], macdBull = false, emaCross = false;
 
             if (cr.status === 'fulfilled' && cr.value?.quotes) {
                 const qs = cr.value.quotes.filter(x => x?.close);
@@ -700,22 +763,57 @@ app.get('/api/signals', async (_req, res) => {
                     const rsiArr = RSI.calculate({ values: closes, period: 14 });
                     if (rsiArr.length) rsi = rsiArr[rsiArr.length - 1];
                 }
+                // MACD confirmation
+                if (closes.length >= 26) {
+                    const macdArr = MACD.calculate({ values: closes, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
+                    if (macdArr.length >= 2) {
+                        const last = macdArr[macdArr.length - 1];
+                        const prev = macdArr[macdArr.length - 2];
+                        // Bullish: histogram turned positive OR MACD crossed above signal
+                        macdBull = (last.histogram > 0 && prev.histogram <= 0) || (last.MACD > last.signal && prev.MACD <= prev.signal);
+                    }
+                }
+                // EMA 9/21 cross confirmation
+                if (closes.length >= 21) {
+                    const ema9  = EMA.calculate({ values: closes, period: 9 });
+                    const ema21 = EMA.calculate({ values: closes, period: 21 });
+                    if (ema9.length >= 2 && ema21.length >= 2) {
+                        const len9 = ema9.length, len21 = ema21.length;
+                        emaCross = ema9[len9 - 1] > ema21[len21 - 1] && ema9[len9 - 2] <= ema21[len21 - 2];
+                    }
+                }
             }
 
             const price = q.regularMarketPrice || (closes.length ? closes[closes.length - 1] : 0);
             const change = q.regularMarketChangePercent || 0;
-            const direction = rsi < 38 ? 'BUY' : rsi > 62 ? 'SELL' : 'HOLD';
+
+            // Multi-factor direction
             const extreme = Math.abs(rsi - 50);
-            const confidence = Math.min(92, Math.round(52 + extreme * 1.3));
+            let direction, confBonus = 0;
+            if (rsi < 38) {
+                direction = 'BUY';
+                if (macdBull || emaCross) confBonus = 8; // confirmed by MACD/EMA
+            } else if (rsi > 62) {
+                direction = 'SELL';
+                if (!macdBull) confBonus = 5; // bearish confirmation
+            } else {
+                direction = 'HOLD';
+            }
+
+            // Action (granular for F&O signal)
+            const action = rsi < 30 ? 'STRONG BUY' : rsi < 38 ? 'BUY' : rsi > 70 ? 'STRONG SELL' : rsi > 62 ? 'SELL' : 'HOLD';
+
+            const confidence = Math.min(94, Math.round(52 + extreme * 1.3 + confBonus));
             const bull = Math.round(Math.max(10, 100 - rsi));
             const bear = Math.round(Math.min(90, rsi));
 
             // Volatility from recent daily returns
             let volLabel = 'MEDIUM';
+            let avgVol7 = 0;
             if (closes.length > 6) {
                 const rets = closes.slice(-8).slice(1).map((c, j) => Math.abs((c - closes[closes.length - 8 + j]) / closes[closes.length - 8 + j]) * 100);
-                const avg = rets.reduce((s, r) => s + r, 0) / rets.length;
-                volLabel = avg > 2.5 ? 'HIGH' : avg > 1.2 ? 'MEDIUM' : 'LOW';
+                avgVol7 = rets.reduce((s, r) => s + r, 0) / rets.length;
+                volLabel = avgVol7 > 2.5 ? 'HIGH' : avgVol7 > 1.2 ? 'MEDIUM' : 'LOW';
             }
 
             // Volume surge
@@ -723,11 +821,29 @@ app.get('/api/signals', async (_req, res) => {
             const relVol = +((q.regularMarketVolume || 0) / avgVol).toFixed(2);
             const volSurge = relVol >= 1.5;
 
-            const rr = direction === 'BUY' ? '2.1' : direction === 'SELL' ? '1.8' : '1.5';
+            // Better R/R based on volatility and direction strength
+            const rrBase = direction === 'BUY' ? 2.1 : direction === 'SELL' ? 1.8 : 1.5;
+            const rr = +(rrBase + (confBonus > 0 ? 0.3 : 0)).toFixed(1);
+
+            // 52W range context
+            const high52 = q.fiftyTwoWeekHigh || price * 1.2;
+            const low52  = q.fiftyTwoWeekLow  || price * 0.8;
+            const pctFrom52High = +((price / high52 - 1) * 100).toFixed(1);
+            const pctFrom52Low  = +((price / low52  - 1) * 100).toFixed(1);
+
             const timeframe = extreme > 20 ? 'Short-term' : 'Intraday';
             const geoDriver = (gtiData.events?.[i % Math.max(1, gtiData.events.length)]?.title) || CLS_DRIVERS[cls] || 'Global macro uncertainty';
 
-            return { ticker: sym.replace('.NS', ''), name, cls, price: +price.toFixed(2), change: +change.toFixed(2), direction, confidence, bull, bear, vol: volLabel, relVol, volSurge, rr, timeframe, geoDriver };
+            return {
+                ticker: sym.replace('.NS', ''), name, cls,
+                price: +price.toFixed(2), change: +change.toFixed(2),
+                direction, action, confidence, bull, bear,
+                vol: volLabel, relVol, volSurge, rr: String(rr),
+                timeframe, geoDriver,
+                macdBull, emaCross,
+                pctFrom52High, pctFrom52Low,
+                rsi: +rsi.toFixed(1),
+            };
         });
 
         sigCache = signals; sigCacheTs = Date.now();
@@ -897,6 +1013,88 @@ const COUNTRY_INDICES = {
     PHL: ['PSEi.PS'],
 };
 
+// ── Market Breadth ──
+let breadthCache = { data: null, ts: 0 };
+const BREADTH_TTL = 30000;
+
+const SECTOR_MAP = {
+    'Banking':        ['HDFCBANK.NS','ICICIBANK.NS','KOTAKBANK.NS','AXISBANK.NS','SBIN.NS','INDUSINDBK.NS','BANDHANBNK.NS','FEDERALBNK.NS','CANBK.NS','PNB.NS'],
+    'IT':             ['TCS.NS','INFY.NS','WIPRO.NS','HCLTECH.NS','TECHM.NS','MPHASIS.NS','OFSS.NS','NAUKRI.NS'],
+    'Energy':         ['RELIANCE.NS','ONGC.NS','BPCL.NS','IOC.NS','GAIL.NS','TATAPOWER.NS','ATGL.NS'],
+    'Auto':           ['MARUTI.NS','TATAMOTORS.NS','M&M.NS','BAJAJ-AUTO.NS','EICHERMOT.NS','HEROMOTOCO.NS','MOTHERSON.NS'],
+    'Pharma':         ['SUNPHARMA.NS','CIPLA.NS','DRREDDY.NS','DIVISLAB.NS','LUPIN.NS','AUROPHARMA.NS','TORNTPHARM.NS','BIOCON.NS'],
+    'FMCG':           ['HINDUNILVR.NS','ITC.NS','NESTLEIND.NS','BRITANNIA.NS','TATACONSUM.NS','MARICO.NS','COLPAL.NS','GODREJCP.NS'],
+    'Metals':         ['TATASTEEL.NS','JSWSTEEL.NS','HINDALCO.NS','COALINDIA.NS','NMDC.NS','SAIL.NS','HINDZINC.NS','VEDL.NS'],
+    'Infrastructure': ['LT.NS','ADANIPORTS.NS','ADANIENT.NS','CONCOR.NS','INDUSTOWER.NS','BEL.NS','SIEMENS.NS'],
+    'Realty':         ['DLF.NS','GODREJPROP.NS','AMBUJACEM.NS','ULTRACEMCO.NS','SHREECEM.NS','GRASIM.NS'],
+    'Finance':        ['BAJFINANCE.NS','BAJAJFINSV.NS','CHOLAFIN.NS','MUTHOOTFIN.NS','SBICARD.NS','ICICIPRULI.NS','SBILIFE.NS','HDFCLIFE.NS','MFSL.NS'],
+};
+
+app.get('/api/marketbreadth', async (_req, res) => {
+    if (breadthCache.data && Date.now() - breadthCache.ts < BREADTH_TTL) return res.json(breadthCache.data);
+    try {
+        const allSyms = [...new Set(Object.values(SECTOR_MAP).flat())];
+        const quotes = await yahooFinance.quote(allSyms).catch(() => []);
+        const qMap = {};
+        (Array.isArray(quotes) ? quotes : []).forEach(q => { if (q?.symbol) qMap[q.symbol] = q; });
+
+        let advances = 0, declines = 0, unchanged = 0;
+        const sectorData = {};
+
+        for (const [sector, syms] of Object.entries(SECTOR_MAP)) {
+            let sAdv = 0, sDec = 0, sUnc = 0, totalChg = 0, count = 0;
+            for (const sym of syms) {
+                const q = qMap[sym];
+                if (!q?.regularMarketChangePercent) continue;
+                const chg = q.regularMarketChangePercent;
+                totalChg += chg; count++;
+                if (chg > 0.1) { sAdv++; advances++; }
+                else if (chg < -0.1) { sDec++; declines++; }
+                else { sUnc++; unchanged++; }
+            }
+            sectorData[sector] = {
+                advances: sAdv, declines: sDec, unchanged: sUnc,
+                changePercent: count ? +(totalChg / count).toFixed(2) : 0,
+                count,
+            };
+        }
+
+        const total = advances + declines + unchanged || 1;
+        const adRatio = declines ? +(advances / declines).toFixed(2) : advances > 0 ? 9.99 : 1.00;
+        const breadthPct = +((advances / total) * 100).toFixed(1);
+        const breadthSignal = breadthPct >= 65 ? 'BULLISH' : breadthPct <= 35 ? 'BEARISH' : 'NEUTRAL';
+
+        const data = { advances, declines, unchanged, total, adRatio, breadthPct, breadthSignal, sectors: sectorData };
+        breadthCache = { data, ts: Date.now() };
+        res.json(data);
+    } catch { res.json(breadthCache.data || { advances: 0, declines: 0, unchanged: 0, total: 0, adRatio: 1, breadthPct: 50, breadthSignal: 'NEUTRAL', sectors: {} }); }
+});
+
+// ── Rates Board (bonds, forex, commodities) ──
+let ratesCache = { data: null, ts: 0 };
+const RATES_TTL = 15000;
+
+app.get('/api/rates', async (_req, res) => {
+    if (ratesCache.data && Date.now() - ratesCache.ts < RATES_TTL) return res.json(ratesCache.data);
+    try {
+        const syms = ['USDINR=X','EURINR=X','GBPINR=X','JPYINR=X','GC=F','SI=F','CL=F','NG=F','^TNX','^INDIAVIX'];
+        const quotes = await yahooFinance.quote(syms).catch(() => []);
+        const data = (Array.isArray(quotes) ? quotes : []).map(q => ({
+            symbol: q.symbol,
+            name: { 'USDINR=X': 'USD/INR', 'EURINR=X': 'EUR/INR', 'GBPINR=X': 'GBP/INR', 'JPYINR=X': 'JPY/INR',
+                    'GC=F': 'GOLD', 'SI=F': 'SILVER', 'CL=F': 'CRUDE OIL', 'NG=F': 'NAT GAS',
+                    '^TNX': 'US 10Y YIELD', '^INDIAVIX': 'INDIA VIX' }[q.symbol] || q.symbol,
+            price: q.regularMarketPrice,
+            change: q.regularMarketChange || 0,
+            changePercent: q.regularMarketChangePercent || 0,
+            unit: ['USDINR=X','EURINR=X','GBPINR=X','JPYINR=X'].includes(q.symbol) ? '₹' :
+                  q.symbol === '^TNX' ? '%' : q.symbol === 'CL=F' ? '$' : '',
+        }));
+        ratesCache = { data, ts: Date.now() };
+        res.json(data);
+    } catch { res.json(ratesCache.data || []); }
+});
+
 const countryCache = {};
 const COUNTRY_TTL = 60000;
 
@@ -940,11 +1138,11 @@ if (process.env.NODE_ENV === 'production') {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`ProTrader API Live on ${PORT}`);
+    console.log(`TerminalX API Live on ${PORT}`);
     // Pre-warm caches in background so first user gets fast response
     setTimeout(() => {
         fetch(`http://localhost:${PORT}/api/gti`).catch(() => {});
-        fetch(`http://localhost:${PORT}/api/news`).catch(() => {});
+        fetch(`http://localhost:${PORT}/api/globalnews`).catch(() => {});
         fetch(`http://localhost:${PORT}/api/futures`).catch(() => {});
         fetch(`http://localhost:${PORT}/api/indicesbar`).catch(() => {});
         fetch(`http://localhost:${PORT}/api/livetape`).catch(() => {});

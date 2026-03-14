@@ -313,6 +313,10 @@ export default function App() {
     const [selectedExpiry, setSelectedExpiry] = useState(null);
     const selectedExpiryRef = useRef(null);
 
+    // Market breadth + rates
+    const [marketBreadth, setMarketBreadth] = useState(null);
+    const [rates, setRates]               = useState([]);
+
     // Movers
     const [movers, setMovers]         = useState(null);
     const [moversLoading, setMoversLoading] = useState(false);
@@ -429,6 +433,20 @@ export default function App() {
         } catch {}
     }, []);
 
+    const fetchMarketBreadth = useCallback(async () => {
+        try {
+            const r = await fetch(`${API}/marketbreadth`).then(x => x.json());
+            if (r?.total >= 0) setMarketBreadth(r);
+        } catch {}
+    }, []);
+
+    const fetchRates = useCallback(async () => {
+        try {
+            const r = await fetch(`${API}/rates`).then(x => x.json());
+            setRates(Array.isArray(r) ? r : []);
+        } catch {}
+    }, []);
+
     const fetchCountryIndices = useCallback(async (iso, name) => {
         setCountryModal({ iso, name, data: null });
         try {
@@ -440,15 +458,30 @@ export default function App() {
     // Mount & auto-refresh
     useEffect(() => {
         fetchGTI(); fetchSignals(); fetchGlobal(); fetchFutures();
-        fetchLiveTape(); fetchIndicesBar();
+        fetchLiveTape(); fetchIndicesBar(); fetchMarketBreadth(); fetchRates();
         fetchTerminal(ticker, period, interval);
         const t1 = setInterval(fetchGTI, 60000);
         const t2 = setInterval(fetchSignals, 60000);
         const t3 = setInterval(fetchGlobal, 12000);
         const t4 = setInterval(fetchFutures, 12000);
-        const t5 = setInterval(fetchLiveTape, 8000);   // 8s — Yahoo Finance movers
-        const t6 = setInterval(fetchIndicesBar, 3000); // 3s — NSE live indices
-        return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); clearInterval(t4); clearInterval(t5); clearInterval(t6); };
+        const t5 = setInterval(fetchLiveTape, 8000);
+        const t6 = setInterval(fetchIndicesBar, 3000);
+        const t7 = setInterval(fetchMarketBreadth, 30000);
+        const t8 = setInterval(fetchRates, 15000);
+        return () => { [t1,t2,t3,t4,t5,t6,t7,t8].forEach(clearInterval); };
+    }, []);
+
+    // Keyboard shortcuts: F1=home F2=geopulse F3=terminal F4=signals
+    useEffect(() => {
+        const handler = (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            if (e.key === 'F1') { e.preventDefault(); setActiveView('home'); }
+            if (e.key === 'F2') { e.preventDefault(); setActiveView('geopulse'); }
+            if (e.key === 'F3') { e.preventDefault(); setActiveView('terminal'); }
+            if (e.key === 'F4') { e.preventDefault(); setActiveView('signals'); }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
     }, []);
 
     useEffect(() => { fetchMovers(activeMovTf); }, [activeMovTf]);
@@ -491,6 +524,19 @@ export default function App() {
         fetchTerminal(sym, period, interval);
         setActiveView('terminal');
     };
+
+    // Market status (NSE: Mon-Fri 09:15-15:30 IST = UTC+5:30)
+    const marketStatus = (() => {
+        const now = new Date();
+        const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        const day = ist.getDay(); // 0=Sun 6=Sat
+        const mins = ist.getHours() * 60 + ist.getMinutes();
+        if (day === 0 || day === 6) return { label: 'CLOSED', color: '#64748b', open: false };
+        if (mins < 555) return { label: 'PRE-MKT', color: '#eab308', open: false };      // before 09:15
+        if (mins < 930) return { label: 'OPEN', color: '#10b981', open: true };           // 09:15-15:30
+        if (mins < 960) return { label: 'CLOSING', color: '#fb923c', open: false };       // 15:30-16:00
+        return { label: 'CLOSED', color: '#64748b', open: false };
+    })();
 
     // Derived
     const d = data, t = d?.technicals, rec = d?.recommendation;
@@ -574,17 +620,39 @@ export default function App() {
             {/* ── MAIN ── */}
             <div className="geo-main">
 
-                {/* ════ HOME VIEW — TERMINALX ════ */}
+                {/* ════ HOME VIEW — TERMINALX BLOOMBERG ════ */}
                 {activeView === 'home' && (() => {
-                    const alerts    = news.filter(n => n.highImpact || n.sentimentScore <= 25 || n.sentimentScore >= 80).slice(0, 8);
-                    const feedNews  = news.filter(n => !alerts.includes(n)).slice(0, 20);
-                    const mktItems  = [...indicesBar.slice(0, 12), ...futures.slice(0, 6)];
-                    const callOpps  = signals.filter(s => s.action === 'STRONG BUY' || s.action === 'BUY').sort((a,b) => b.confidence - a.confidence).slice(0, 6);
-                    const putOpps   = signals.filter(s => s.action === 'STRONG SELL' || s.action === 'SELL').sort((a,b) => b.confidence - a.confidence).slice(0, 4);
-                    const foOpps    = [...callOpps.map(s => ({...s, type:'CALL'})), ...putOpps.map(s => ({...s, type:'PUT'}))].sort((a,b) => b.confidence - a.confidence).slice(0, 10);
-                    const volSurges = signals.filter(s => s.volSurge).length;
+                    const alerts     = news.filter(n => n.highImpact || n.sentimentScore <= 25 || n.sentimentScore >= 80).slice(0, 10);
+                    const feedNews   = news.filter(n => !alerts.includes(n)).slice(0, 30);
+                    const mktItems   = [...indicesBar.slice(0, 14), ...futures.slice(0, 6)];
+                    const callOpps   = signals.filter(s => s.direction === 'BUY' || s.action === 'STRONG BUY').sort((a,b) => b.confidence - a.confidence).slice(0, 8);
+                    const putOpps    = signals.filter(s => s.direction === 'SELL' || s.action === 'STRONG SELL').sort((a,b) => b.confidence - a.confidence).slice(0, 6);
+                    const foOpps     = [...callOpps.map(s => ({...s, type:'CALL'})), ...putOpps.map(s => ({...s, type:'PUT'}))].sort((a,b) => b.confidence - a.confidence).slice(0, 14);
+                    const volSurges  = signals.filter(s => s.volSurge).length;
+                    const strongSigs = signals.filter(s => s.action === 'STRONG BUY' || s.action === 'STRONG SELL').length;
                     const approxStrike = p => !p ? 0 : p > 10000 ? Math.round(p/500)*500 : p > 3000 ? Math.round(p/100)*100 : p > 1000 ? Math.round(p/50)*50 : Math.round(p/10)*10;
-                    const topSigs   = signals.slice(0, 8);
+                    const topSigs    = [...signals].sort((a,b) => b.confidence - a.confidence).slice(0, 12);
+
+                    // Sector heatmap from breadth
+                    const sectorEntries = Object.entries(marketBreadth?.sectors || {}).sort((a,b) => b[1].changePercent - a[1].changePercent);
+
+                    // Rates helpers
+                    const rateItem = sym => rates.find(r => r.symbol === sym);
+                    const usdInr   = rateItem('USDINR=X');
+                    const gold     = rateItem('GC=F');
+                    const crude    = rateItem('CL=F');
+                    const vix      = rateItem('^INDIAVIX');
+
+                    // Economic calendar (upcoming key events)
+                    const calendar = [
+                        { date: 'Mar 19', event: 'RBI MPC Minutes', impact: 'HIGH',   type: 'RBI'   },
+                        { date: 'Mar 20', event: 'US FOMC Decision', impact: 'HIGH',  type: 'FED'   },
+                        { date: 'Mar 21', event: 'India WPI Inflation', impact: 'MED', type: 'DATA' },
+                        { date: 'Mar 28', event: 'US GDP Q4 Final', impact: 'MED',    type: 'DATA'  },
+                        { date: 'Apr 02', event: 'India PMI Manufacturing', impact: 'MED', type: 'DATA' },
+                        { date: 'Apr 07', event: 'RBI Policy Meeting', impact: 'HIGH', type: 'RBI'  },
+                    ];
+
                     return (
                     <div className="home-view hb-home">
 
@@ -593,28 +661,31 @@ export default function App() {
                             <div className="hbc-logo">
                                 <span className="hbc-logo-icon">◈</span>
                                 <span className="hbc-logo-text">Terminal<span>X</span></span>
-                                <span className="hbc-logo-sub">MARKET INTELLIGENCE TERMINAL</span>
+                                <span className="hbc-logo-sub">PROFESSIONAL MARKET TERMINAL</span>
                             </div>
                             <form className="hbc-search" onSubmit={e => { e.preventDefault(); handleSelect(search); }}>
                                 <span className="hbc-search-label">SYMBOL&gt;</span>
                                 <input
                                     value={search}
                                     onChange={e => setSearch(e.target.value)}
-                                    placeholder="RELIANCE.NS   TCS.NS   ^NSEI   AAPL"
+                                    placeholder="RELIANCE.NS   HDFCBANK.NS   ^NSEI   GC=F"
                                     className="hbc-search-input"
                                     autoCapitalize="characters"
                                 />
                                 <button type="submit" className="hbc-search-btn">GO</button>
                             </form>
                             <div className="hbc-quick">
-                                {['RELIANCE.NS','TCS.NS','HDFCBANK.NS','INFY.NS','^NSEI','AAPL'].map(s => (
-                                    <button key={s} className="hbc-quick-btn" onClick={() => handleSelect(s)}>
-                                        {s.replace('.NS','')}
-                                    </button>
+                                {[['RELIANCE','RELIANCE.NS'],['TCS','TCS.NS'],['HDFCBANK','HDFCBANK.NS'],['INFY','INFY.NS'],['SBIN','SBIN.NS'],['NIFTY','^NSEI'],['GOLD','GC=F']].map(([lbl,s]) => (
+                                    <button key={s} className="hbc-quick-btn" onClick={() => handleSelect(s)}>{lbl}</button>
                                 ))}
                             </div>
-                            <div className="hbc-status"><span className="hbc-status-dot" />LIVE</div>
-                            <div className="hbc-time">{clock}</div>
+                            <div className="hbc-status-grp">
+                                <div className="hbc-mkt-status" style={{ color: marketStatus.color, borderColor: marketStatus.color + '55' }}>
+                                    <span className="hbc-status-dot" style={{ background: marketStatus.color, boxShadow: `0 0 5px ${marketStatus.color}` }} />
+                                    NSE {marketStatus.label}
+                                </div>
+                                <div className="hbc-time">{clock}</div>
+                            </div>
                         </div>
 
                         {/* ── Market Overview Bar ── */}
@@ -644,12 +715,16 @@ export default function App() {
                         {/* ── Stats Row ── */}
                         <div className="hb-stats-row">
                             {[
-                                { val: indicesBar.length || '20+', lbl: 'NSE INDICES', color: 'var(--accent)' },
-                                { val: news.length     || '—',    lbl: 'LIVE NEWS',   color: 'var(--warn)'   },
-                                { val: callOpps.length || '—',    lbl: 'CALL OPP',    color: 'var(--pos)'    },
-                                { val: putOpps.length  || '—',    lbl: 'PUT OPP',     color: 'var(--neg)'    },
-                                { val: volSurges       || '—',    lbl: 'VOL SURGES',  color: 'var(--high)'   },
-                                { val: gtiScore,                   lbl: 'GTI SCORE',  color: gtiCol          },
+                                { val: signals.length  || '—',             lbl: 'SIGNALS',      color: 'var(--accent)' },
+                                { val: callOpps.length || '—',             lbl: 'CALL OPP',     color: 'var(--pos)'    },
+                                { val: putOpps.length  || '—',             lbl: 'PUT OPP',      color: 'var(--neg)'    },
+                                { val: volSurges       || '0',             lbl: 'VOL SURGES',   color: 'var(--high)'   },
+                                { val: strongSigs      || '0',             lbl: 'STRONG SIG',   color: '#a78bfa'       },
+                                { val: marketBreadth ? `${marketBreadth.advances}↑` : '—', lbl: 'ADVANCES', color: 'var(--pos)' },
+                                { val: marketBreadth ? `${marketBreadth.declines}↓` : '—', lbl: 'DECLINES', color: 'var(--neg)' },
+                                { val: marketBreadth?.adRatio ?? '—',     lbl: 'A/D RATIO',    color: marketBreadth?.adRatio > 1 ? 'var(--pos)' : 'var(--neg)' },
+                                { val: gtiScore,                           lbl: 'GTI',          color: gtiCol          },
+                                { val: news.length     || '—',            lbl: 'NEWS FEEDS',   color: 'var(--warn)'   },
                             ].map(s => (
                                 <div key={s.lbl} className="hbs-stat">
                                     <div className="hbs-val" style={{ color: s.color }}>{s.val}</div>
@@ -658,12 +733,11 @@ export default function App() {
                             ))}
                         </div>
 
-                        {/* ── Dashboard Grid ── */}
+                        {/* ── Dashboard Grid (3 columns) ── */}
                         <div className="hb-dash-grid">
 
-                            {/* LEFT COLUMN */}
+                            {/* ── LEFT COLUMN: News ── */}
                             <div className="hbd-left">
-
                                 {/* MARKET ALERTS */}
                                 <div className="hbd-panel hbd-alerts-panel">
                                     <div className="hbd-panel-hdr hbd-hdr-alert">
@@ -681,7 +755,7 @@ export default function App() {
                                                     {n.confirmed && <span className="hbdr-chk">✓</span>}
                                                     {n.title}
                                                 </span>
-                                                <span className="hbdr-pub">{(n.publisher||'').slice(0,12)}</span>
+                                                <span className="hbdr-pub">{(n.publisher||'').slice(0,14)}</span>
                                                 <span className="hbdr-time">{n.time}</span>
                                             </a>
                                         ))
@@ -693,7 +767,7 @@ export default function App() {
                                     <div className="hbd-panel-hdr">
                                         <span className="hbd-dot hbd-dot-live" />
                                         LIVE MARKET INTELLIGENCE
-                                        <span className="hbd-panel-sub">{news.length} STORIES · 6 FEEDS</span>
+                                        <span className="hbd-panel-sub">{news.length} STORIES · 6 SOURCES</span>
                                     </div>
                                     {feedNews.length === 0
                                         ? <div className="hbd-empty">Fetching market intelligence…</div>
@@ -702,16 +776,129 @@ export default function App() {
                                                 className={`hbd-news-row${n.highImpact ? ' hbdr-hi' : ''}`}>
                                                 <span className="hbdr-sent" style={{ color: sentColor(n.sentiment) }}>{sentLabel(n.sentiment)}</span>
                                                 <span className="hbdr-title">{n.title}</span>
-                                                <span className="hbdr-pub">{(n.publisher||'').slice(0,12)}</span>
+                                                <span className="hbdr-pub">{(n.publisher||'').slice(0,14)}</span>
                                                 <span className="hbdr-time">{n.time}</span>
                                             </a>
                                         ))
                                     }
                                 </div>
-
                             </div>{/* /hbd-left */}
 
-                            {/* RIGHT COLUMN */}
+                            {/* ── MIDDLE COLUMN: Breadth + Rates + Calendar ── */}
+                            <div className="hbd-mid">
+
+                                {/* SECTOR HEATMAP */}
+                                <div className="hbd-panel hbd-sector-panel">
+                                    <div className="hbd-panel-hdr">
+                                        <span className="hbd-dot hbd-dot-live" />
+                                        SECTOR PERFORMANCE
+                                        <span className="hbd-panel-sub">NSE LIVE · {sectorEntries.length} SECTORS</span>
+                                    </div>
+                                    <div className="hbd-sector-grid">
+                                        {sectorEntries.length === 0
+                                            ? Array.from({length: 10}, (_,i) => (
+                                                <div key={i} className="hbd-sector-cell loading-cell">
+                                                    <span className="hbsc-name">{'—'}</span>
+                                                    <span className="hbsc-chg">—</span>
+                                                </div>
+                                            ))
+                                            : sectorEntries.map(([sector, data]) => {
+                                                const chg = data.changePercent;
+                                                const intensity = Math.min(1, Math.abs(chg) / 3);
+                                                const bg = chg > 0
+                                                    ? `rgba(16,185,129,${0.08 + intensity * 0.25})`
+                                                    : chg < 0
+                                                    ? `rgba(239,68,68,${0.08 + intensity * 0.25})`
+                                                    : 'rgba(100,116,139,0.08)';
+                                                return (
+                                                    <div key={sector} className="hbd-sector-cell" style={{ background: bg, borderColor: chg > 0 ? 'rgba(16,185,129,0.3)' : chg < 0 ? 'rgba(239,68,68,0.3)' : 'rgba(100,116,139,0.15)' }}>
+                                                        <span className="hbsc-name">{sector.toUpperCase()}</span>
+                                                        <span className="hbsc-chg" style={{ color: chg > 0 ? 'var(--pos)' : chg < 0 ? 'var(--neg)' : 'var(--muted)' }}>
+                                                            {chg > 0 ? '▲' : chg < 0 ? '▼' : '~'}{Math.abs(chg).toFixed(2)}%
+                                                        </span>
+                                                        <span className="hbsc-adv">{data.advances}↑ {data.declines}↓</span>
+                                                    </div>
+                                                );
+                                            })
+                                        }
+                                    </div>
+                                </div>
+
+                                {/* MARKET BREADTH */}
+                                {marketBreadth && (
+                                    <div className="hbd-panel hbd-breadth-panel">
+                                        <div className="hbd-panel-hdr">
+                                            <span className="hbd-dot" style={{ background: marketBreadth.breadthSignal === 'BULLISH' ? 'var(--pos)' : marketBreadth.breadthSignal === 'BEARISH' ? 'var(--neg)' : 'var(--warn)', boxShadow: '0 0 5px currentColor' }} />
+                                            MARKET BREADTH
+                                            <span className="hbd-panel-sub" style={{ color: marketBreadth.breadthSignal === 'BULLISH' ? 'var(--pos)' : marketBreadth.breadthSignal === 'BEARISH' ? 'var(--neg)' : 'var(--warn)' }}>
+                                                {marketBreadth.breadthSignal} · A/D {marketBreadth.adRatio}
+                                            </span>
+                                        </div>
+                                        <div className="hbd-breadth-body">
+                                            <div className="hbb-stats">
+                                                <div className="hbb-stat-item"><span className="pos">▲ ADV</span><strong className="pos">{marketBreadth.advances}</strong></div>
+                                                <div className="hbb-stat-item"><span className="neg">▼ DEC</span><strong className="neg">{marketBreadth.declines}</strong></div>
+                                                <div className="hbb-stat-item"><span>~ UNC</span><strong>{marketBreadth.unchanged}</strong></div>
+                                                <div className="hbb-stat-item"><span>A/D</span><strong style={{ color: marketBreadth.adRatio >= 1 ? 'var(--pos)' : 'var(--neg)' }}>{marketBreadth.adRatio}</strong></div>
+                                            </div>
+                                            <div className="hbb-bar-wrap">
+                                                <div className="hbb-bar-adv" style={{ width: `${(marketBreadth.advances / marketBreadth.total) * 100}%` }} />
+                                                <div className="hbb-bar-unc" style={{ width: `${(marketBreadth.unchanged / marketBreadth.total) * 100}%` }} />
+                                                <div className="hbb-bar-dec" style={{ width: `${(marketBreadth.declines / marketBreadth.total) * 100}%` }} />
+                                            </div>
+                                            <div className="hbb-pct">
+                                                <span className="pos">{marketBreadth.breadthPct}% Advancing</span>
+                                                <span className="neg">{(100 - marketBreadth.breadthPct).toFixed(1)}% Declining</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* RATES BOARD */}
+                                <div className="hbd-panel hbd-rates-panel">
+                                    <div className="hbd-panel-hdr">
+                                        <span className="hbd-dot hbd-dot-live" />
+                                        RATES &amp; COMMODITIES
+                                        <span className="hbd-panel-sub">LIVE · USD · FOREX</span>
+                                    </div>
+                                    <div className="hbd-rates-grid">
+                                        {rates.length === 0
+                                            ? <div className="hbd-empty">Fetching rates…</div>
+                                            : rates.map((r,i) => (
+                                                <div key={i} className="hbd-rate-row">
+                                                    <span className="hbrate-name">{r.name}</span>
+                                                    <span className="hbrate-price">
+                                                        {r.unit}{r.price != null ? r.price.toLocaleString('en-US', { maximumFractionDigits: r.symbol.includes('INR') ? 2 : r.symbol === '^TNX' ? 3 : 2 }) : '—'}
+                                                    </span>
+                                                    <span className={`hbrate-chg ${r.changePercent >= 0 ? 'pos' : 'neg'}`}>
+                                                        {r.changePercent >= 0 ? '▲' : '▼'}{Math.abs(r.changePercent).toFixed(2)}%
+                                                    </span>
+                                                </div>
+                                            ))
+                                        }
+                                    </div>
+                                </div>
+
+                                {/* ECONOMIC CALENDAR */}
+                                <div className="hbd-panel hbd-cal-panel">
+                                    <div className="hbd-panel-hdr">
+                                        <span className="hbd-dot" style={{ background: '#a78bfa', boxShadow: '0 0 5px #a78bfa' }} />
+                                        ECONOMIC CALENDAR
+                                        <span className="hbd-panel-sub">UPCOMING KEY EVENTS</span>
+                                    </div>
+                                    {calendar.map((ev, i) => (
+                                        <div key={i} className="hbd-cal-row">
+                                            <span className="hbcal-date">{ev.date}</span>
+                                            <span className={`hbcal-type hbcal-type-${ev.type.toLowerCase()}`}>{ev.type}</span>
+                                            <span className="hbcal-event">{ev.event}</span>
+                                            <span className={`hbcal-impact ${ev.impact === 'HIGH' ? 'neg' : 'warn'}`}>{ev.impact}</span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                            </div>{/* /hbd-mid */}
+
+                            {/* ── RIGHT COLUMN: GTI + F&O + Signals ── */}
                             <div className="hbd-right">
 
                                 {/* GTI PANEL */}
@@ -756,44 +943,52 @@ export default function App() {
                                         <span className="hbd-fo-putcount">▼ PUT {putOpps.length}</span>
                                     </div>
                                     <div className="hbd-fo-colhdr">
-                                        <span>TYPE</span><span>SYMBOL</span><span>~STRIKE</span><span>CONF</span><span>R/R</span><span>SIGNAL</span>
+                                        <span>TYPE</span><span>SYM</span><span>~STRIKE</span><span>RSI</span><span>CONF</span><span>R/R</span><span>SIG</span>
                                     </div>
                                     {foOpps.length === 0
-                                        ? <div className="hbd-empty">Loading F&amp;O opportunities…</div>
+                                        ? <div className="hbd-empty">Loading F&amp;O signals…</div>
                                         : foOpps.map((s, i) => (
                                             <div key={i} className={`hbd-fo-row ${s.type === 'CALL' ? 'fo-call-row' : 'fo-put-row'}`}
                                                 onClick={() => handleSelect((s.ticker||'') + '.NS')}>
                                                 <span className={`hbfo-type ${s.type === 'CALL' ? 'fo-call' : 'fo-put'}`}>{s.type}</span>
                                                 <span className="hbfo-sym">{s.ticker}</span>
                                                 <span className="hbfo-strike">₹{approxStrike(s.price)?.toLocaleString('en-IN')}</span>
-                                                <span className="hbfo-conf" style={{ color: s.confidence >= 75 ? 'var(--pos)' : s.confidence >= 60 ? 'var(--warn)' : 'var(--muted)' }}>
+                                                <span className="hbfo-rsi" style={{ color: s.rsi < 35 ? 'var(--pos)' : s.rsi > 65 ? 'var(--neg)' : 'var(--muted)' }}>
+                                                    {s.rsi ?? '—'}
+                                                </span>
+                                                <span className="hbfo-conf" style={{ color: s.confidence >= 80 ? '#34d399' : s.confidence >= 65 ? 'var(--warn)' : 'var(--muted)' }}>
                                                     {s.confidence}%
                                                 </span>
                                                 <span className="hbfo-rr">{s.rr}x</span>
-                                                <span className="hbfo-action" style={{ color: actionColor(s.action) }}>{s.action}</span>
+                                                <span className="hbfo-action" style={{ color: actionColor(s.action || s.direction) }}>{s.action || s.direction}</span>
                                             </div>
                                         ))
                                     }
                                 </div>
 
-                                {/* AI SIGNALS */}
+                                {/* AI SIGNALS TABLE */}
                                 <div className="hbd-panel hbd-sig-panel">
                                     <div className="hbd-panel-hdr">
                                         <span className="hbd-dot hbd-dot-live" />
-                                        AI SIGNALS
-                                        <span className="hbd-panel-sub">{signals.length} ACTIVE · {volSurges} SURGE</span>
+                                        AI SIGNAL FEED
+                                        <span className="hbd-panel-sub">{signals.length} STOCKS · {volSurges} SURGE · {strongSigs} STRONG</span>
                                     </div>
                                     <div className="hbd-sig-colhdr">
-                                        <span>SYMBOL</span><span>ACTION</span><span>PRICE</span><span>CONF</span><span>R/R</span>
+                                        <span>SYMBOL</span><span>SECTOR</span><span>ACTION</span><span>PRICE</span><span>RSI</span><span>CONF</span><span>R/R</span>
                                     </div>
                                     {topSigs.length === 0
                                         ? <div className="hbd-empty">Loading signals…</div>
                                         : topSigs.map((s, i) => (
-                                            <div key={i} className="hbd-sig-row" onClick={() => handleSelect((s.ticker||s.symbol||'') + (s.ticker ? '.NS' : ''))}>
-                                                <span className="hbsr-sym">{(s.ticker||s.symbol||'').replace('.NS','')}</span>
-                                                <span className="hbsr-action" style={{ color: actionColor(s.action) }}>{s.action}</span>
+                                            <div key={i} className={`hbd-sig-row${s.volSurge ? ' sig-surge' : ''}`}
+                                                onClick={() => handleSelect((s.ticker||'') + '.NS')}>
+                                                <span className="hbsr-sym">{(s.ticker||'').replace('.NS','')}</span>
+                                                <span className="hbsr-cls">{s.cls}</span>
+                                                <span className="hbsr-action" style={{ color: actionColor(s.action || s.direction) }}>{s.action || s.direction}</span>
                                                 <span className="hbsr-price">₹{s.price ? Number(s.price).toLocaleString('en-IN',{maximumFractionDigits:0}) : '—'}</span>
-                                                <span className="hbsr-conf" style={{ color: s.confidence >= 75 ? 'var(--pos)' : s.confidence >= 60 ? 'var(--warn)' : 'var(--muted)' }}>
+                                                <span className="hbsr-rsi" style={{ color: s.rsi < 35 ? 'var(--pos)' : s.rsi > 65 ? 'var(--neg)' : 'var(--muted)' }}>
+                                                    {s.rsi ?? '—'}
+                                                </span>
+                                                <span className="hbsr-conf" style={{ color: s.confidence >= 80 ? '#34d399' : s.confidence >= 65 ? 'var(--warn)' : 'var(--muted)' }}>
                                                     {s.confidence ? `${s.confidence}%` : '—'}
                                                 </span>
                                                 <span className="hbsr-rr">{s.rr ? `${s.rr}x` : '—'}</span>
@@ -806,12 +1001,12 @@ export default function App() {
                                 <div className="hbd-panel hbd-nav-panel">
                                     <div className="hbd-panel-hdr">
                                         <span className="hbd-dot hbd-dot-live" />
-                                        TERMINAL NAVIGATION
+                                        TERMINAL MODULES
                                     </div>
                                     {[
-                                        { icon: '⊕', key: 'F1', title: 'EARTH PULSE', sub: 'Globe · Country Risk · Geo Events',   view: 'geopulse', color: 'var(--accent)' },
-                                        { icon: '⊞', key: 'F2', title: 'TERMINAL',    sub: 'Charts · Technicals · Options Chain', view: 'terminal',  color: 'var(--pos)'    },
-                                        { icon: '⊿', key: 'F3', title: 'AI SIGNALS',  sub: 'Black-Scholes · GTI-Adjusted · Live', view: 'signals',   color: 'var(--warn)'   },
+                                        { icon: '⊕', key: 'F2', title: 'EARTH PULSE', sub: 'Globe · Country Risk · Geo Events',       view: 'geopulse', color: 'var(--accent)' },
+                                        { icon: '⊞', key: 'F3', title: 'TERMINAL',    sub: 'Charts · Technicals · Options Chain',     view: 'terminal',  color: 'var(--pos)'    },
+                                        { icon: '⊿', key: 'F4', title: 'AI SIGNALS',  sub: `NIFTY 50 · MACD+RSI · ${signals.length} active`, view: 'signals', color: 'var(--warn)' },
                                     ].map(c => (
                                         <div key={c.view} className="hbd-nav-btn" onClick={() => setActiveView(c.view)}>
                                             <span className="hbn-key" style={{ color: c.color, borderColor: c.color }}>{c.key}</span>
