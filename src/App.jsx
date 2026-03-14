@@ -520,8 +520,8 @@ export default function App() {
                 <div className="gh-logo" onClick={() => setActiveView('home')} style={{ cursor: 'pointer' }}>
                     <div className="gh-logo-icon">◈</div>
                     <div>
-                        <div className="gh-logo-name">ProTrader<span className="gh-acc">AI</span></div>
-                        <div className="gh-logo-sub">GEO INTELLIGENCE · v2.0</div>
+                        <div className="gh-logo-name">Terminal<span className="gh-acc">X</span></div>
+                        <div className="gh-logo-sub">MARKET INTELLIGENCE · v3.0</div>
                     </div>
                 </div>
 
@@ -574,64 +574,262 @@ export default function App() {
             {/* ── MAIN ── */}
             <div className="geo-main">
 
-                {/* ════ HOME VIEW ════ */}
-                {activeView === 'home' && (
-                    <div className="home-view">
-                        <div className="home-hero">
-                            <div className="home-logo-icon">◈</div>
-                            <div className="home-title">ProTrader<span>AI</span></div>
-                            <div className="home-subtitle">Geo Intelligence · Real-Time Markets · v2.0</div>
-                            <div className="home-tagline">AI-powered stock analysis, global risk intelligence, and live Indian market data — all in one terminal.</div>
+                {/* ════ HOME VIEW — TERMINALX ════ */}
+                {activeView === 'home' && (() => {
+                    const alerts    = news.filter(n => n.highImpact || n.sentimentScore <= 25 || n.sentimentScore >= 80).slice(0, 8);
+                    const feedNews  = news.filter(n => !alerts.includes(n)).slice(0, 20);
+                    const mktItems  = [...indicesBar.slice(0, 12), ...futures.slice(0, 6)];
+                    const callOpps  = signals.filter(s => s.action === 'STRONG BUY' || s.action === 'BUY').sort((a,b) => b.confidence - a.confidence).slice(0, 6);
+                    const putOpps   = signals.filter(s => s.action === 'STRONG SELL' || s.action === 'SELL').sort((a,b) => b.confidence - a.confidence).slice(0, 4);
+                    const foOpps    = [...callOpps.map(s => ({...s, type:'CALL'})), ...putOpps.map(s => ({...s, type:'PUT'}))].sort((a,b) => b.confidence - a.confidence).slice(0, 10);
+                    const volSurges = signals.filter(s => s.volSurge).length;
+                    const approxStrike = p => !p ? 0 : p > 10000 ? Math.round(p/500)*500 : p > 3000 ? Math.round(p/100)*100 : p > 1000 ? Math.round(p/50)*50 : Math.round(p/10)*10;
+                    const topSigs   = signals.slice(0, 8);
+                    return (
+                    <div className="home-view hb-home">
+
+                        {/* ── Command Bar ── */}
+                        <div className="hb-cmd-bar">
+                            <div className="hbc-logo">
+                                <span className="hbc-logo-icon">◈</span>
+                                <span className="hbc-logo-text">Terminal<span>X</span></span>
+                                <span className="hbc-logo-sub">MARKET INTELLIGENCE TERMINAL</span>
+                            </div>
+                            <form className="hbc-search" onSubmit={e => { e.preventDefault(); handleSelect(search); }}>
+                                <span className="hbc-search-label">SYMBOL&gt;</span>
+                                <input
+                                    value={search}
+                                    onChange={e => setSearch(e.target.value)}
+                                    placeholder="RELIANCE.NS   TCS.NS   ^NSEI   AAPL"
+                                    className="hbc-search-input"
+                                    autoCapitalize="characters"
+                                />
+                                <button type="submit" className="hbc-search-btn">GO</button>
+                            </form>
+                            <div className="hbc-quick">
+                                {['RELIANCE.NS','TCS.NS','HDFCBANK.NS','INFY.NS','^NSEI','AAPL'].map(s => (
+                                    <button key={s} className="hbc-quick-btn" onClick={() => handleSelect(s)}>
+                                        {s.replace('.NS','')}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="hbc-status"><span className="hbc-status-dot" />LIVE</div>
+                            <div className="hbc-time">{clock}</div>
                         </div>
 
-                        <div className="home-stats">
-                            {[
-                                { val: indicesBar.length || '20+', lbl: 'NSE Indices' },
-                                { val: signals.length || '—', lbl: 'AI Signals' },
-                                { val: news.length || '—', lbl: 'News Stories' },
-                                { val: gtiScore, lbl: 'GTI Score' },
-                            ].map(s => (
-                                <div key={s.lbl} className="home-stat">
-                                    <div className="home-stat-val">{s.val}</div>
-                                    <div className="home-stat-lbl">{s.lbl}</div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="home-cards">
-                            {[
-                                { icon: '⊕', title: 'Earth Pulse', desc: 'Globe view with country risk scores, live news feed, and global market intelligence.', view: 'geopulse' },
-                                { icon: '⊞', title: 'Terminal', desc: 'Deep stock analysis — charts, technicals, financials, options chain, and AI signals.', view: 'terminal' },
-                                { icon: '⊿', title: 'AI Signals', desc: 'GTI-adjusted buy/sell/hold signals with Black-Scholes model for Indian & global stocks.', view: 'signals' },
-                            ].map(c => (
-                                <div key={c.view} className="home-card" onClick={() => setActiveView(c.view)}>
-                                    <div className="home-card-icon">{c.icon}</div>
-                                    <div className="home-card-title">{c.title}</div>
-                                    <div className="home-card-desc">{c.desc}</div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {news.length > 0 && (
-                            <div className="home-news">
-                                <div className="home-news-title">Live Market News</div>
-                                <div className="home-news-list">
-                                    {news.slice(0, 8).map((n, i) => (
-                                        <a key={i} href={n.link} target="_blank" rel="noreferrer"
-                                            className={`home-news-item${n.highImpact ? ' hi' : ''}`}>
-                                            <div className="home-ni-top">
-                                                <span className="home-ni-sent" style={{ color: sentColor(n.sentiment) }}>{sentLabel(n.sentiment)}</span>
-                                                <span className="home-ni-time">{n.time}</span>
+                        {/* ── Market Overview Bar ── */}
+                        <div className="hb-mkt-bar">
+                            <div className="hbm-label">MKT</div>
+                            <div className="hbm-track-wrap">
+                                <div className="hbm-track">
+                                    {[...mktItems, ...mktItems].map((item, i) => {
+                                        const chg = item.changePercent ?? item.change ?? 0;
+                                        const isPos = chg >= 0;
+                                        return (
+                                            <div key={i} className={`hbm-chip ${isPos ? 'hbm-pos' : 'hbm-neg'}`}>
+                                                <span className="hbm-sym">{(item.symbol || item.name || '').replace('.NS','').replace('^','')}</span>
+                                                <span className="hbm-price">{item.price != null ? item.price.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</span>
+                                                <span className="hbm-chg">{isPos ? '▲' : '▼'}{Math.abs(chg).toFixed(2)}%</span>
                                             </div>
-                                            <div className="home-ni-title">{n.title}</div>
-                                            <div className="home-ni-pub">{n.publisher}</div>
-                                        </a>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
-                        )}
+                            <div className="hbm-gti" style={{ color: gtiCol }}>
+                                GTI <span className="hbm-gti-score">{gtiScore}</span>
+                                <span className="hbm-gti-lvl" style={{ borderColor: gtiCol, color: gtiCol }}>{gtiLvl}</span>
+                            </div>
+                        </div>
+
+                        {/* ── Stats Row ── */}
+                        <div className="hb-stats-row">
+                            {[
+                                { val: indicesBar.length || '20+', lbl: 'NSE INDICES', color: 'var(--accent)' },
+                                { val: news.length     || '—',    lbl: 'LIVE NEWS',   color: 'var(--warn)'   },
+                                { val: callOpps.length || '—',    lbl: 'CALL OPP',    color: 'var(--pos)'    },
+                                { val: putOpps.length  || '—',    lbl: 'PUT OPP',     color: 'var(--neg)'    },
+                                { val: volSurges       || '—',    lbl: 'VOL SURGES',  color: 'var(--high)'   },
+                                { val: gtiScore,                   lbl: 'GTI SCORE',  color: gtiCol          },
+                            ].map(s => (
+                                <div key={s.lbl} className="hbs-stat">
+                                    <div className="hbs-val" style={{ color: s.color }}>{s.val}</div>
+                                    <div className="hbs-lbl">{s.lbl}</div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* ── Dashboard Grid ── */}
+                        <div className="hb-dash-grid">
+
+                            {/* LEFT COLUMN */}
+                            <div className="hbd-left">
+
+                                {/* MARKET ALERTS */}
+                                <div className="hbd-panel hbd-alerts-panel">
+                                    <div className="hbd-panel-hdr hbd-hdr-alert">
+                                        <span className="hbd-dot hbd-dot-alert" />
+                                        MARKET ALERTS
+                                        {alerts.length > 0 && <span className="hbd-badge hbd-badge-alert">{alerts.length}</span>}
+                                        <span className="hbd-panel-sub">HIGH IMPACT · MULTI-SOURCE VERIFIED</span>
+                                    </div>
+                                    {alerts.length === 0
+                                        ? <div className="hbd-empty">No high-impact alerts detected</div>
+                                        : alerts.map((n, i) => (
+                                            <a key={i} href={n.link} target="_blank" rel="noreferrer" className="hbd-news-row hbd-alert-row">
+                                                <span className="hbdr-sent" style={{ color: sentColor(n.sentiment) }}>{sentLabel(n.sentiment)}</span>
+                                                <span className="hbdr-title">
+                                                    {n.confirmed && <span className="hbdr-chk">✓</span>}
+                                                    {n.title}
+                                                </span>
+                                                <span className="hbdr-pub">{(n.publisher||'').slice(0,12)}</span>
+                                                <span className="hbdr-time">{n.time}</span>
+                                            </a>
+                                        ))
+                                    }
+                                </div>
+
+                                {/* LIVE NEWS FEED */}
+                                <div className="hbd-panel hbd-news-panel">
+                                    <div className="hbd-panel-hdr">
+                                        <span className="hbd-dot hbd-dot-live" />
+                                        LIVE MARKET INTELLIGENCE
+                                        <span className="hbd-panel-sub">{news.length} STORIES · 6 FEEDS</span>
+                                    </div>
+                                    {feedNews.length === 0
+                                        ? <div className="hbd-empty">Fetching market intelligence…</div>
+                                        : feedNews.map((n, i) => (
+                                            <a key={i} href={n.link} target="_blank" rel="noreferrer"
+                                                className={`hbd-news-row${n.highImpact ? ' hbdr-hi' : ''}`}>
+                                                <span className="hbdr-sent" style={{ color: sentColor(n.sentiment) }}>{sentLabel(n.sentiment)}</span>
+                                                <span className="hbdr-title">{n.title}</span>
+                                                <span className="hbdr-pub">{(n.publisher||'').slice(0,12)}</span>
+                                                <span className="hbdr-time">{n.time}</span>
+                                            </a>
+                                        ))
+                                    }
+                                </div>
+
+                            </div>{/* /hbd-left */}
+
+                            {/* RIGHT COLUMN */}
+                            <div className="hbd-right">
+
+                                {/* GTI PANEL */}
+                                <div className="hbd-panel hbd-gti-panel">
+                                    <div className="hbd-panel-hdr">
+                                        <span className="hbd-dot" style={{ background: gtiCol, boxShadow: `0 0 6px ${gtiCol}` }} />
+                                        GLOBAL TENSION INDEX
+                                        <span className="hbd-gti-score" style={{ color: gtiCol }}>{gtiScore}</span>
+                                        <span className="hbd-badge" style={{ borderColor: gtiCol, color: gtiCol, background: 'transparent' }}>{gtiLvl}</span>
+                                    </div>
+                                    <div className="hbd-gti-body">
+                                        <div className="hbg-bar-track">
+                                            <div className="hbg-bar-fill" style={{ width: `${gtiScore}%`, background: gtiCol }} />
+                                        </div>
+                                        <div className="hbg-zones">
+                                            <span style={{ color: 'var(--low)' }}>LOW 0-35</span>
+                                            <span style={{ color: 'var(--med)' }}>MED 35-60</span>
+                                            <span style={{ color: 'var(--high)' }}>HIGH 60-80</span>
+                                            <span style={{ color: 'var(--crit)' }}>CRIT 80+</span>
+                                        </div>
+                                        <div className="hbg-spark">
+                                            {gtiHistory.map((v, i) => (
+                                                <div key={i} className="hbg-spark-bar" style={{ height: `${(v/100)*100}%`, background: gtiColor(v) }} />
+                                            ))}
+                                        </div>
+                                        {(gti.events||[]).slice(0,3).map((e,i) => (
+                                            <div key={i} className={`hbg-event lvl-${(e.level||'low').toLowerCase()}`}>
+                                                <span className={`hbg-dot lvl-${(e.level||'low').toLowerCase()}`} />
+                                                <span className="hbg-evt-title">{e.title}</span>
+                                                <span className="hbg-evt-meta">{e.region}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* F&O OPPORTUNITIES */}
+                                <div className="hbd-panel hbd-fo-panel">
+                                    <div className="hbd-panel-hdr hbd-hdr-fo">
+                                        <span className="hbd-dot hbd-dot-fo" />
+                                        F&amp;O OPPORTUNITIES
+                                        <span className="hbd-fo-callcount">▲ CALL {callOpps.length}</span>
+                                        <span className="hbd-fo-putcount">▼ PUT {putOpps.length}</span>
+                                    </div>
+                                    <div className="hbd-fo-colhdr">
+                                        <span>TYPE</span><span>SYMBOL</span><span>~STRIKE</span><span>CONF</span><span>R/R</span><span>SIGNAL</span>
+                                    </div>
+                                    {foOpps.length === 0
+                                        ? <div className="hbd-empty">Loading F&amp;O opportunities…</div>
+                                        : foOpps.map((s, i) => (
+                                            <div key={i} className={`hbd-fo-row ${s.type === 'CALL' ? 'fo-call-row' : 'fo-put-row'}`}
+                                                onClick={() => handleSelect((s.ticker||'') + '.NS')}>
+                                                <span className={`hbfo-type ${s.type === 'CALL' ? 'fo-call' : 'fo-put'}`}>{s.type}</span>
+                                                <span className="hbfo-sym">{s.ticker}</span>
+                                                <span className="hbfo-strike">₹{approxStrike(s.price)?.toLocaleString('en-IN')}</span>
+                                                <span className="hbfo-conf" style={{ color: s.confidence >= 75 ? 'var(--pos)' : s.confidence >= 60 ? 'var(--warn)' : 'var(--muted)' }}>
+                                                    {s.confidence}%
+                                                </span>
+                                                <span className="hbfo-rr">{s.rr}x</span>
+                                                <span className="hbfo-action" style={{ color: actionColor(s.action) }}>{s.action}</span>
+                                            </div>
+                                        ))
+                                    }
+                                </div>
+
+                                {/* AI SIGNALS */}
+                                <div className="hbd-panel hbd-sig-panel">
+                                    <div className="hbd-panel-hdr">
+                                        <span className="hbd-dot hbd-dot-live" />
+                                        AI SIGNALS
+                                        <span className="hbd-panel-sub">{signals.length} ACTIVE · {volSurges} SURGE</span>
+                                    </div>
+                                    <div className="hbd-sig-colhdr">
+                                        <span>SYMBOL</span><span>ACTION</span><span>PRICE</span><span>CONF</span><span>R/R</span>
+                                    </div>
+                                    {topSigs.length === 0
+                                        ? <div className="hbd-empty">Loading signals…</div>
+                                        : topSigs.map((s, i) => (
+                                            <div key={i} className="hbd-sig-row" onClick={() => handleSelect((s.ticker||s.symbol||'') + (s.ticker ? '.NS' : ''))}>
+                                                <span className="hbsr-sym">{(s.ticker||s.symbol||'').replace('.NS','')}</span>
+                                                <span className="hbsr-action" style={{ color: actionColor(s.action) }}>{s.action}</span>
+                                                <span className="hbsr-price">₹{s.price ? Number(s.price).toLocaleString('en-IN',{maximumFractionDigits:0}) : '—'}</span>
+                                                <span className="hbsr-conf" style={{ color: s.confidence >= 75 ? 'var(--pos)' : s.confidence >= 60 ? 'var(--warn)' : 'var(--muted)' }}>
+                                                    {s.confidence ? `${s.confidence}%` : '—'}
+                                                </span>
+                                                <span className="hbsr-rr">{s.rr ? `${s.rr}x` : '—'}</span>
+                                            </div>
+                                        ))
+                                    }
+                                </div>
+
+                                {/* NAVIGATION */}
+                                <div className="hbd-panel hbd-nav-panel">
+                                    <div className="hbd-panel-hdr">
+                                        <span className="hbd-dot hbd-dot-live" />
+                                        TERMINAL NAVIGATION
+                                    </div>
+                                    {[
+                                        { icon: '⊕', key: 'F1', title: 'EARTH PULSE', sub: 'Globe · Country Risk · Geo Events',   view: 'geopulse', color: 'var(--accent)' },
+                                        { icon: '⊞', key: 'F2', title: 'TERMINAL',    sub: 'Charts · Technicals · Options Chain', view: 'terminal',  color: 'var(--pos)'    },
+                                        { icon: '⊿', key: 'F3', title: 'AI SIGNALS',  sub: 'Black-Scholes · GTI-Adjusted · Live', view: 'signals',   color: 'var(--warn)'   },
+                                    ].map(c => (
+                                        <div key={c.view} className="hbd-nav-btn" onClick={() => setActiveView(c.view)}>
+                                            <span className="hbn-key" style={{ color: c.color, borderColor: c.color }}>{c.key}</span>
+                                            <span className="hbn-icon" style={{ color: c.color }}>{c.icon}</span>
+                                            <div className="hbn-text">
+                                                <span className="hbn-title" style={{ color: c.color }}>{c.title}</span>
+                                                <span className="hbn-sub">{c.sub}</span>
+                                            </div>
+                                            <span className="hbn-arrow">›</span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                            </div>{/* /hbd-right */}
+                        </div>{/* /hb-dash-grid */}
                     </div>
-                )}
+                    );
+                })()}
 
                 {/* ════ GEO PULSE VIEW ════ */}
                 {activeView === 'geopulse' && (

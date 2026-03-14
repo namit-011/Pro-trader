@@ -30,16 +30,42 @@ const toPeriod1 = (rangeStr) => {
 };
 
 const dSec = (t) => {
-    const k = { 'Banking': ['bank', 'hdfc', 'icici', 'axis', 'sbi', 'rbi'], 'IT': ['tcs', 'infy', 'wipro', 'tech', 'software'], 'Energy': ['oil', 'reliance', 'fuel', 'gas', 'power'], 'Auto': ['tata motors', 'maruti', 'mahindra', 'automotive'] };
-    const f = Object.keys(k).filter(s => k[s].some(x => t.toLowerCase().includes(x)));
-    return f.length ? f : ['Market'];
+    const low = t.toLowerCase();
+    const k = {
+        'Banking':  ['bank', 'hdfc', 'icici', 'axis', 'sbi', 'rbi', 'kotak', 'npa', 'credit', 'nbfc', 'lending'],
+        'IT':       ['tcs', 'infy', 'infosys', 'wipro', 'hcl', 'tech mahindra', 'software', 'ai ', 'digital'],
+        'Energy':   ['oil', 'reliance', 'crude', 'fuel', 'gas', 'power', 'ongc', 'bpcl', 'petroleum', 'renewable'],
+        'Pharma':   ['pharma', 'drug', 'medicine', 'fda', 'cipla', 'sun pharma', 'health', 'vaccine', 'biotech'],
+        'Auto':     ['maruti', 'mahindra', 'bajaj auto', 'hero motor', 'ev ', 'electric vehicle', 'automotive'],
+        'Metal':    ['steel', 'jswsteel', 'tatasteel', 'hindalco', 'vedanta', 'aluminium', 'copper', 'mining'],
+        'Telecom':  ['airtel', 'jio', 'vodafone', 'telecom', '5g', 'spectrum'],
+        'Finance':  ['sebi', 'sensex', 'nifty', 'fii', 'ipo', 'bajaj finance', 'stock market', 'equity'],
+        'FMCG':     ['hindustan unilever', 'hul', 'nestle', 'dabur', 'fmcg', 'itc'],
+        'Realty':   ['real estate', 'dlf', 'housing', 'property', 'realty'],
+    };
+    const f = Object.keys(k).filter(s => k[s].some(x => low.includes(x)));
+    return f.length ? f : ['Broad Market'];
 };
+
+const BULLISH_W = ['surge', 'rally', 'soar', 'record', 'beat', 'bullish', 'growth', 'rise', 'gain', 'profit', 'outperform', 'upgrade', 'strong', 'boom', 'high', 'climbs', 'jumps'];
+const BEARISH_W = ['crash', 'plunge', 'tumble', 'crisis', 'recession', 'slump', 'fall', 'loss', 'decline', 'weak', 'bearish', 'downgrade', 'cut', 'drop', 'worry', 'concerns', 'panic', 'miss'];
 
 const dSent = (t) => {
     const low = t.toLowerCase();
-    if (['surge', 'rally', 'high', 'gain', 'beat', 'bullish', 'growth', 'record', 'rise', 'soar'].some(w => low.includes(w))) return 'bullish';
-    if (['crash', 'drop', 'low', 'loss', 'cut', 'bearish', 'slump', 'fall', 'weak', 'decline'].some(w => low.includes(w))) return 'bearish';
+    const b = BULLISH_W.filter(w => low.includes(w)).length;
+    const n = BEARISH_W.filter(w => low.includes(w)).length;
+    if (b > n) return 'bullish';
+    if (n > b) return 'bearish';
     return 'neutral';
+};
+
+// 0 = strong bearish, 50 = neutral, 100 = strong bullish
+const dSentScore = (t) => {
+    const low = t.toLowerCase();
+    let score = 50;
+    BULLISH_W.forEach(w => { if (low.includes(w)) score += 10; });
+    BEARISH_W.forEach(w => { if (low.includes(w)) score -= 10; });
+    return Math.max(0, Math.min(100, score));
 };
 
 const dIndiaImpact = (t) => {
@@ -316,16 +342,23 @@ app.get('/api/global', async (req, res) => {
     } catch { res.json([]); }
 });
 
-const HIGH_IMPACT_WORDS = ['rbi', 'crash', 'surge', 'fed', 'interest rate', 'nifty', 'sensex', 'sebi', 'budget', 'gdp'];
+const HIGH_IMPACT_WORDS = [
+    'rbi', 'crash', 'surge', 'fed', 'interest rate', 'nifty', 'sensex', 'sebi', 'budget', 'gdp',
+    'rate hike', 'rate cut', 'inflation', 'recession', 'war', 'sanctions', 'ban', 'crisis',
+    'default', 'collapse', 'record high', 'all-time high', 'circuit', 'fii', 'tariff', 'oil price',
+];
 
 const mapNewsItem = (title, link, publisher, timestamp) => ({
     title, link, publisher,
     timestamp,
     time: getRelativeTime(new Date(timestamp)),
     rawTime: new Date(timestamp).toLocaleString('en-IN'),
-    sectors: dSec(title), sentiment: dSent(title),
+    sectors: dSec(title),
+    sentiment: dSent(title),
+    sentimentScore: dSentScore(title),
     indiaImpact: dIndiaImpact(title),
     highImpact: HIGH_IMPACT_WORDS.some(w => title.toLowerCase().includes(w)),
+    confirmed: false,
 });
 
 app.get('/api/globalnews', async (req, res) => {
@@ -367,7 +400,7 @@ app.get('/api/globalnews', async (req, res) => {
         const yfItems  = yfRes.status  === 'fulfilled' ? yfRes.value  : [];
 
         const seen = new Set();
-        const merged = [...rssItems, ...yfItems]
+        const deduped = [...rssItems, ...yfItems]
             .filter(n => {
                 const key = (n.title || '').slice(0, 45).toLowerCase().replace(/\s+/g, '');
                 if (seen.has(key)) return false;
@@ -375,6 +408,17 @@ app.get('/api/globalnews', async (req, res) => {
             })
             .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
             .slice(0, 50);
+
+        // Cross-source confirmation: mark items covered by 2+ publishers
+        const merged = deduped.map(item => {
+            const words = (item.title || '').toLowerCase().split(/\s+/).filter(w => w.length > 4);
+            const confirmedBy = deduped.filter(other =>
+                other !== item &&
+                other.publisher !== item.publisher &&
+                words.filter(w => (other.title || '').toLowerCase().includes(w)).length >= 3
+            );
+            return confirmedBy.length > 0 ? { ...item, confirmed: true } : item;
+        });
 
         res.json(merged);
     } catch { res.json([]); }
