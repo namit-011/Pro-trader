@@ -19,7 +19,7 @@ app.use(helmet({
 // Rate Limiting
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 200, // limit each IP to 200 requests per windowMs
+    max: 1000, // Increased to 1000 to accommodate multi-request 15s refresh dashboard
     message: { error: 'Too many requests, please try again later.' }
 });
 
