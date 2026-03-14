@@ -307,8 +307,8 @@ export default function App() {
     const [options, setOptions]   = useState(null);
     const [loading, setLoading]   = useState(false);
     const [activeTab, setActiveTab] = useState('technical');
-    const [period, setPeriod]     = useState('6mo');
-    const [interval, setInterval] = useState('1d');
+    const [period, setPeriod]     = useState('1d');
+    const [interval, setInterval] = useState('5m');
     const [search, setSearch]     = useState('RELIANCE.NS');
     const [selectedExpiry, setSelectedExpiry] = useState(null);
     const selectedExpiryRef = useRef(null);
@@ -518,10 +518,15 @@ export default function App() {
 
     const handleSelect = (s) => {
         if (!s) return;
-        const sym = s.toUpperCase().trim();
+        let sym = s.toUpperCase().trim();
+        // Auto-append .NS for bare Indian stock symbols (no suffix, no ^, no =F)
+        if (sym && !sym.includes('.') && !sym.startsWith('^') && !sym.endsWith('=F') && !sym.endsWith('=X')) {
+            sym = sym + '.NS';
+        }
         setTicker(sym); setSearch(sym);
         setSelectedExpiry(null); selectedExpiryRef.current = null;
-        fetchTerminal(sym, period, interval);
+        setPeriod('1d'); setInterval('5m');
+        fetchTerminal(sym, '1d', '5m');
         setActiveView('terminal');
     };
 
@@ -593,7 +598,7 @@ export default function App() {
 
                 <div className="gh-right">
                     <form className="gh-search" onSubmit={e => { e.preventDefault(); handleSelect(search); }}>
-                        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="RELIANCE.NS, AAPL, ^NSEI…" />
+                        <input value={search} onChange={e => setSearch(e.target.value.toUpperCase())} placeholder="RELIANCE · AAPL · ^NSEI · GC=F" />
                         <button type="submit">→</button>
                     </form>
                     <div className="gh-live-badge"><span className="gh-dot" />LIVE · {signals.length} feeds</div>
@@ -624,7 +629,7 @@ export default function App() {
                 {activeView === 'home' && (() => {
                     const alerts     = news.filter(n => n.highImpact || n.sentimentScore <= 25 || n.sentimentScore >= 80).slice(0, 10);
                     const feedNews   = news.filter(n => !alerts.includes(n)).slice(0, 30);
-                    const mktItems   = [...indicesBar.slice(0, 14), ...futures.slice(0, 6)];
+                    const mktItems   = indicesBar;
                     const callOpps   = signals.filter(s => s.direction === 'BUY' || s.action === 'STRONG BUY').sort((a,b) => b.confidence - a.confidence).slice(0, 8);
                     const putOpps    = signals.filter(s => s.direction === 'SELL' || s.action === 'STRONG SELL').sort((a,b) => b.confidence - a.confidence).slice(0, 6);
                     const foOpps     = [...callOpps.map(s => ({...s, type:'CALL'})), ...putOpps.map(s => ({...s, type:'PUT'}))].sort((a,b) => b.confidence - a.confidence).slice(0, 14);
@@ -667,15 +672,21 @@ export default function App() {
                                 <span className="hbc-search-label">SYMBOL&gt;</span>
                                 <input
                                     value={search}
-                                    onChange={e => setSearch(e.target.value)}
-                                    placeholder="RELIANCE.NS   HDFCBANK.NS   ^NSEI   GC=F"
+                                    onChange={e => setSearch(e.target.value.toUpperCase())}
+                                    placeholder="RELIANCE · HDFCBANK · ^NSEI · AAPL · GC=F"
                                     className="hbc-search-input"
                                     autoCapitalize="characters"
+                                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleSelect(search))}
                                 />
-                                <button type="submit" className="hbc-search-btn">GO</button>
+                                <button type="submit" className="hbc-search-btn">GO ›</button>
                             </form>
                             <div className="hbc-quick">
-                                {[['RELIANCE','RELIANCE.NS'],['TCS','TCS.NS'],['HDFCBANK','HDFCBANK.NS'],['INFY','INFY.NS'],['SBIN','SBIN.NS'],['NIFTY','^NSEI'],['GOLD','GC=F']].map(([lbl,s]) => (
+                                {[
+                                    ['RELIANCE','RELIANCE.NS'],['TCS','TCS.NS'],['HDFCBANK','HDFCBANK.NS'],
+                                    ['INFY','INFY.NS'],['SBIN','SBIN.NS'],['BHARTIARTL','BHARTIARTL.NS'],
+                                    ['ICICIBANK','ICICIBANK.NS'],['NIFTY','^NSEI'],['BANKNIFTY','^NSEBANK'],
+                                    ['SENSEX','^BSESN'],['GOLD','GC=F'],['CRUDE','CL=F'],
+                                ].map(([lbl,s]) => (
                                     <button key={s} className="hbc-quick-btn" onClick={() => handleSelect(s)}>{lbl}</button>
                                 ))}
                             </div>
@@ -690,7 +701,7 @@ export default function App() {
 
                         {/* ── Market Overview Bar ── */}
                         <div className="hb-mkt-bar">
-                            <div className="hbm-label">MKT</div>
+                            <div className="hbm-label">NSE LIVE</div>
                             <div className="hbm-track-wrap">
                                 <div className="hbm-track">
                                     {[...mktItems, ...mktItems].map((item, i) => {
@@ -864,17 +875,22 @@ export default function App() {
                                     <div className="hbd-rates-grid">
                                         {rates.length === 0
                                             ? <div className="hbd-empty">Fetching rates…</div>
-                                            : rates.map((r,i) => (
-                                                <div key={i} className="hbd-rate-row">
-                                                    <span className="hbrate-name">{r.name}</span>
-                                                    <span className="hbrate-price">
-                                                        {r.unit}{r.price != null ? r.price.toLocaleString('en-US', { maximumFractionDigits: r.symbol.includes('INR') ? 2 : r.symbol === '^TNX' ? 3 : 2 }) : '—'}
-                                                    </span>
-                                                    <span className={`hbrate-chg ${r.changePercent >= 0 ? 'pos' : 'neg'}`}>
-                                                        {r.changePercent >= 0 ? '▲' : '▼'}{Math.abs(r.changePercent).toFixed(2)}%
-                                                    </span>
-                                                </div>
-                                            ))
+                                            : rates.map((r,i) => {
+                                                const clickable = r.symbol.endsWith('=F') || r.symbol.startsWith('^');
+                                                return (
+                                                    <div key={i} className="hbd-rate-row"
+                                                        style={{ cursor: clickable ? 'pointer' : 'default' }}
+                                                        onClick={clickable ? () => handleSelect(r.symbol) : undefined}>
+                                                        <span className="hbrate-name">{r.name}</span>
+                                                        <span className="hbrate-price">
+                                                            {r.unit}{r.price != null ? r.price.toLocaleString('en-US', { maximumFractionDigits: r.symbol.includes('INR') ? 2 : r.symbol === '^TNX' ? 3 : 2 }) : '—'}
+                                                        </span>
+                                                        <span className={`hbrate-chg ${r.changePercent >= 0 ? 'pos' : 'neg'}`}>
+                                                            {r.changePercent >= 0 ? '▲' : '▼'}{Math.abs(r.changePercent).toFixed(2)}%
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })
                                         }
                                     </div>
                                 </div>
@@ -1566,30 +1582,54 @@ export default function App() {
 
             </div>{/* /geo-main */}
 
-            {/* ── BOTTOM BAR — Scrolling NSE Indices ── */}
-            <div className="geo-bottom indices-bar">
-                <div className="ib-label">
-                    <span className="ib-live-dot" />NSE LIVE
-                </div>
-                <div className="ib-track-wrap">
-                    <div className="ib-track">
-                        {[...indicesBar, ...indicesBar].map((idx, i) => (
-                            <div key={i} className="ib-chip">
-                                <span className="ib-name">{idx.name.replace('S&P BSE SENSEX', 'SENSEX').replace('NIFTY FINANCIAL SERVICES', 'NIFTY FIN SVC').replace('NIFTY HEALTHCARE INDEX', 'NIFTY HEALTH').replace('NIFTY CONSUMER DURABLES', 'NIFTY CONS DUR')}</span>
-                                <span className="ib-price">{idx.price?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                <span className={`ib-chg ${(idx.changePercent || 0) >= 0 ? 'pos' : 'neg'}`}>
-                                    {(idx.changePercent || 0) >= 0 ? '▲' : '▼'}{Math.abs(idx.changePercent || 0).toFixed(2)}%
-                                </span>
+            {/* ── BOTTOM BAR — Global Markets + Commodities ── */}
+            {(() => {
+                // Futures already has DJI, S&P, NASDAQ, CRUDE, GOLD, USD/INR
+                // Add Silver + NatGas from rates (not in futures)
+                const extraSyms = ['SI=F','NG=F'];
+                const extraItems = rates.filter(r => extraSyms.includes(r.symbol)).map(r => ({
+                    name: r.name, symbol: r.symbol,
+                    price: r.price, changePercent: r.changePercent,
+                    unit: r.unit,
+                }));
+                const globalItems = [
+                    ...futures,
+                    ...extraItems,
+                ];
+                const barItems = globalItems.length > 0 ? globalItems : [];
+                return (
+                    <div className="geo-bottom indices-bar">
+                        <div className="ib-label">
+                            <span className="ib-live-dot" />GLOBAL MKT
+                        </div>
+                        <div className="ib-track-wrap">
+                            <div className="ib-track">
+                                {[...barItems, ...barItems].map((item, i) => {
+                                    const chg = item.changePercent ?? 0;
+                                    const isComm = ['SI=F','NG=F','GC=F','CL=F','USDINR=X'].includes(item.symbol);
+                                    return (
+                                        <div key={i} className="ib-chip" style={{ cursor: isComm ? 'default' : 'pointer' }}
+                                            onClick={isComm ? undefined : () => handleSelect(item.symbol)}>
+                                            <span className="ib-name">{(item.name || item.symbol || '').replace('Futures','').replace('S&P 500','SPX').replace('Dow Jones','DJIA').replace('NASDAQ','NDX').replace('FTSE 100','FTSE').replace('Nikkei 225','NIKKEI').replace('DAX PERFORMANCE-INDEX','DAX').replace('Hang Seng','HSI').trim()}</span>
+                                            <span className="ib-price">
+                                                {item.unit || ''}{item.price != null ? item.price.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—'}
+                                            </span>
+                                            <span className={`ib-chg ${chg >= 0 ? 'pos' : 'neg'}`}>
+                                                {chg >= 0 ? '▲' : '▼'}{Math.abs(chg).toFixed(2)}%
+                                            </span>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                        ))}
+                        </div>
+                        <div className="ib-gti" style={{ color: gtiCol }}>
+                            <GTISparkline history={gtiHistory} />
+                            <span className="ib-gti-score">{gtiScore}</span>
+                            <span className="ib-gti-lvl">{gtiLvl}</span>
+                        </div>
                     </div>
-                </div>
-                <div className="ib-gti" style={{ color: gtiCol }}>
-                    <GTISparkline history={gtiHistory} />
-                    <span className="ib-gti-score">{gtiScore}</span>
-                    <span className="ib-gti-lvl">{gtiLvl}</span>
-                </div>
-            </div>
+                );
+            })()}
 
             {/* ── MOBILE BOTTOM NAV ── */}
             <nav className="mobile-nav">
