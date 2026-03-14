@@ -5,7 +5,7 @@ const API = '/api';
 
 // ── Helpers ──
 const fmt = (n, d = 2) => (n != null && !isNaN(n)) ? Number(n).toFixed(d) : 'N/A';
-const fmtCur = (n, c = '₹') => (n != null && !isNaN(n)) ? `${c}${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A';
+const fmtCur = (n, c = '₹') => (n != null && !isNaN(n) && n !== 0) ? `${c}${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A';
 
 // GTI helpers
 const gtiColor  = g => g >= 80 ? '#ef4444' : g >= 60 ? '#fb923c' : g >= 35 ? '#3b82f6' : '#22c55e';
@@ -512,15 +512,25 @@ export default function App() {
             upColor: '#10b981', downColor: '#ef4444', borderVisible: false,
             wickUpColor: '#10b981', wickDownColor: '#ef4444',
         });
-        const vs = chart.addSeries(LightweightCharts.HistogramSeries, {
-            color: '#3b82f6', priceFormat: { type: 'volume' }, priceScaleId: '',
-        });
-        vs.priceScale().applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
         cs.setData(data.chartData);
-        vs.setData(data.chartData.map(v => ({
-            time: v.time, value: v.volume,
-            color: v.close >= v.open ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)',
-        })));
+        // Only show volume histogram when there is actual volume data (not for indices)
+        const allVols = data.chartData.map(v => v.volume || 0).filter(v => v > 0);
+        const hasVolume = allVols.length > 0 && !data.isIndex;
+        if (hasVolume) {
+            const vs = chart.addSeries(LightweightCharts.HistogramSeries, {
+                color: '#3b82f6', priceFormat: { type: 'volume' }, priceScaleId: '',
+            });
+            vs.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+            // Compute average volume for spike detection
+            const avgVol = allVols.length > 1 ? allVols.slice(0, -1).reduce((a, b) => a + b, 0) / (allVols.length - 1) : 0;
+            vs.setData(data.chartData.map(v => {
+                const isSpike = avgVol > 0 && (v.volume || 0) > avgVol * 1.5;
+                const color = isSpike
+                    ? (v.close >= v.open ? 'rgba(0,255,180,0.85)' : 'rgba(255,80,80,0.85)')
+                    : (v.close >= v.open ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)');
+                return { time: v.time, value: v.volume, color };
+            }));
+        }
         chart.timeScale().fitContent();
         chartRef.current = chart;
         const onResize = () => { if (chartContainerRef.current) chart.applyOptions({ width: chartContainerRef.current.clientWidth }); };
@@ -1216,6 +1226,11 @@ export default function App() {
                                                     {d.change >= 0 ? '▲' : '▼'} {fmt(Math.abs(d.change))} ({fmt(Math.abs(d.changePercent))}%)
                                                 </span>
                                             </div>
+                                            {d.volSpike && (
+                                                <div className="vol-spike-alert">
+                                                    ⚡ VOL SPIKE {d.volSpikeRatio}x avg · {d.volume ? (d.volume/1e6).toFixed(1)+'M' : ''}
+                                                </div>
+                                            )}
                                             <div className="th-meta">
                                                 {[
                                                     ['Open', d.openPrice ? fmtCur(d.openPrice, cur) : 'N/A'],
@@ -1224,6 +1239,9 @@ export default function App() {
                                                     ['Prev Close', d.prevClose ? fmtCur(d.prevClose, cur) : 'N/A'],
                                                     ['52W High', d.fiftyTwoWeekHigh ? fmtCur(d.fiftyTwoWeekHigh, cur) : 'N/A'],
                                                     ['52W Low', d.fiftyTwoWeekLow ? fmtCur(d.fiftyTwoWeekLow, cur) : 'N/A'],
+                                                    ['Prev Day H', t?.prevDayH ? fmtCur(t.prevDayH, cur) : 'N/A'],
+                                                    ['Prev Day L', t?.prevDayL ? fmtCur(t.prevDayL, cur) : 'N/A'],
+                                                    ['VWAP', t?.vwap ? fmtCur(t.vwap, cur) : 'N/A'],
                                                     ['Volume', d.volume ? (
                                                         <span style={{display: 'flex', alignItems: 'center', gap: '6px'}}>
                                                             {(d.volume / 1e6).toFixed(2) + 'M'}
@@ -1411,6 +1429,13 @@ export default function App() {
                                                                     <span className={d.price > v ? 'pos' : 'neg'}>{d.price > v ? '↑ Above' : '↓ Below'}</span>
                                                                 </div>
                                                             ))}
+                                                            {t.vwap && (
+                                                                <div>
+                                                                    <span>VWAP</span>
+                                                                    <strong>{fmtCur(t.vwap, cur)}</strong>
+                                                                    <span className={d.price > t.vwap ? 'pos' : 'neg'}>{d.price > t.vwap ? '↑ Above' : '↓ Below'}</span>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                         {t.bb && (
                                                             <>

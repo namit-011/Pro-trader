@@ -435,6 +435,17 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
 .rec-levels { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
 .rec-levels strong { font-family: var(--mono); }
 
+/* Volume Spike Alert */
+.vol-spike-alert {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 6px; margin-bottom: 4px;
+    padding: 4px 12px; border-radius: 6px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.8px;
+    color: #fde047; background: rgba(234,179,8,0.14);
+    border: 1px solid rgba(234,179,8,0.45);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
 /* Chart */
 .term-chart-card {
     background: var(--card); border: 1px solid var(--border);
@@ -885,13 +896,26 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
     .home-ni-title { font-size: 11px; }
     /* Terminal Fixes */
     .terminal-view, .app-shell, body, html { overflow-x: hidden; }
+    .term-overlay { padding: 12px 12px calc(64px + env(safe-area-inset-bottom)) 12px; }
     .term-hero { flex-direction: column; width: 100%; box-sizing: border-box; }
     .th-left { width: 100%; }
     .th-meta { flex-wrap: wrap; gap: 6px; }
     .th-meta-item { min-width: calc(33.33% - 6px); }
     .th-right { width: 100%; flex-direction: column; margin-top: 10px; }
-    .term-body-split { display: flex; flex-direction: column; width: 100%; }
-    .tbs-left, .tbs-right { width: 100%; box-sizing: border-box; }
+    .term-body-split { display: flex; flex-direction: column; width: 100%; gap: 10px; }
+    .tbs-left { width: 100%; box-sizing: border-box; }
+    .tbs-right {
+        width: 100%; box-sizing: border-box;
+        display: flex; flex-direction: row; gap: 10px;
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+        position: static; max-height: none;
+        padding-bottom: 4px;
+    }
+    .tbs-right .tsr-panel { min-width: 280px; flex-shrink: 0; }
+    /* NSE strip hidden on mobile */
+    .nse-idx-strip { display: none; }
+    /* Home bottom padding so content isn't under nav */
+    .home-view { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
 }
 @media (min-width: 601px) {
     .mobile-nav { display: none; }

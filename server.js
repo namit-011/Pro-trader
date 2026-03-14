@@ -455,7 +455,12 @@ app.get('/api/globalnews', async (req, res) => {
 
 app.get('/api/options/:ticker', async (req, res) => {
     try {
-        const { ticker } = req.params;
+        const rawTicker = req.params.ticker;
+        // Sanitize ticker input
+        const ticker = rawTicker.toUpperCase().replace(/[^A-Z0-9^.=\-_]/g, '');
+        if (!ticker || ticker.length < 1 || ticker.length > 20) {
+            return res.status(400).json({ error: 'Invalid ticker symbol' });
+        }
         const { expiry: requestedExpiry } = req.query;
 
         if (isIndianTicker(ticker)) {
@@ -508,7 +513,11 @@ app.get('/api/analyze/:ticker', async (req, res) => {
         const { ticker } = req.params;
         let { period = '6mo', interval = '1d' } = req.query;
 
-        const sym = ticker.toUpperCase();
+        // Sanitize ticker: allow alphanumeric, ^, ., =, -, _ only
+        const sym = ticker.toUpperCase().replace(/[^A-Z0-9^.=\-_]/g, '');
+        if (!sym || sym.length < 1 || sym.length > 20) {
+            return res.status(400).json({ error: 'Invalid ticker symbol' });
+        }
         const isIntraday = interval.includes('m') || interval === '1h';
         // For intraday: fetch 5d so MACD (26+) always has enough candles
         const intradayRange = interval === '1m' ? '2d' : '5d';
