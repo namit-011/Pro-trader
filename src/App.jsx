@@ -16,6 +16,17 @@ const sentLabel = s => ({ bullish: '▲ BULLISH', bearish: '▼ BEARISH', neutra
 const actionColor = a => ({ 'STRONG BUY': '#10b981', 'BUY': '#10b981', 'HOLD': '#eab308', 'SELL': '#ef4444', 'STRONG SELL': '#b91c1c' }[a] || '#94a3b8');
 const indiaLabel = s => ({ bullish: '▲ India', bearish: '▼ India', neutral: '~ India' }[s] || '~ India');
 
+// NSE index name → Yahoo Finance symbol (for clickable chips)
+const NSE_YAHOO = {
+    'NIFTY 50': '^NSEI', 'NIFTY BANK': '^NSEBANK', 'INDIA VIX': '^INDIAVIX',
+    'S&P BSE SENSEX': '^BSESN', 'NIFTY MIDCAP 100': '^CNXMIDCAP', 'NIFTY SMALLCAP 100': '^CNXSC',
+    'NIFTY IT': '^CNXIT', 'NIFTY AUTO': '^CNXAUTO', 'NIFTY PHARMA': '^CNXPHARMA',
+    'NIFTY FMCG': '^CNXFMCG', 'NIFTY METAL': '^CNXMETAL', 'NIFTY ENERGY': '^CNXENERGY',
+    'NIFTY REALTY': '^CNXREALTY', 'NIFTY FINANCIAL SERVICES': '^NSEBANK',
+    'NIFTY INFRA': '^CNXINFRA', 'NIFTY MEDIA': '^CNXMEDIA',
+};
+const nseShortName = n => n.replace('NIFTY FINANCIAL SERVICES','FINNIFTY').replace('NIFTY MIDCAP 100','MIDCAP').replace('NIFTY SMALLCAP 100','SMALLCAP').replace('S&P BSE SENSEX','SENSEX').replace('NIFTY BANK','BANKNIFTY').replace('NIFTY 50','NIFTY').replace('INDIA VIX','VIX').replace('NIFTY ','');
+
 // Country risk map (ISO_A3 → 0-100)
 const RISK = {
     PRK: 93, RUS: 88, UKR: 84, IRN: 78, SYR: 80, YEM: 82, AFG: 81, IRQ: 73,
@@ -309,6 +320,7 @@ export default function App() {
     const [activeTab, setActiveTab] = useState('technical');
     const [period, setPeriod]     = useState('1d');
     const [interval, setInterval] = useState('5m');
+    const [newsFilter, setNewsFilter] = useState('All'); // terminal news sentiment filter
     const [search, setSearch]     = useState('RELIANCE.NS');
     const [selectedExpiry, setSelectedExpiry] = useState(null);
     const selectedExpiryRef = useRef(null);
@@ -619,6 +631,28 @@ export default function App() {
                             </span>
                         </div>
                     ))}
+                </div>
+            </div>
+
+            {/* ── NSE INDICES STRIP — Pinned Clickable ── */}
+            <div className="nse-idx-strip">
+                <div className="nis-label"><span className="nis-dot" />NSE</div>
+                {indicesBar.slice(0, 10).map((idx, i) => {
+                    const sym = NSE_YAHOO[idx.name];
+                    const chg = idx.changePercent ?? 0;
+                    return (
+                        <div key={i} className={`nis-chip${sym ? ' nis-clickable' : ''}`}
+                            onClick={sym ? () => handleSelect(sym) : undefined}
+                            title={sym ? `Click to analyze ${idx.name}` : idx.name}>
+                            <span className="nis-name">{nseShortName(idx.name)}</span>
+                            <span className="nis-price">{idx.price?.toLocaleString('en-IN', { maximumFractionDigits: idx.name === 'INDIA VIX' ? 2 : 0 })}</span>
+                            <span className={`nis-chg ${chg >= 0 ? 'pos' : 'neg'}`}>{chg >= 0 ? '▲' : '▼'}{Math.abs(chg).toFixed(2)}%</span>
+                        </div>
+                    );
+                })}
+                <div className="nis-status" style={{ color: marketStatus.color }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: marketStatus.color, display: 'inline-block', marginRight: 4, boxShadow: `0 0 5px ${marketStatus.color}` }} />
+                    {marketStatus.label}
                 </div>
             </div>
 
@@ -1220,30 +1254,125 @@ export default function App() {
                                         </div>
                                     </div>
 
-                                    {/* Chart controls */}
-                                    <div className="term-chart-card">
-                                        <div className="tcc-ctrl">
-                                            <div className="tcc-group">
-                                                {['1m', '5m', '15m', '1h', '1d'].map(it => (
-                                                    <button key={it} className={interval === it ? 'active' : ''} onClick={() => { setInterval(it); if (it !== '1d') setPeriod('1d'); fetchTerminal(ticker, it !== '1d' ? '1d' : period, it); }}>{it}</button>
-                                                ))}
-                                            </div>
-                                            <div className="tcc-group">
-                                                {['1d', '1wk', '1mo', '6mo', '1y'].map(p => (
-                                                    <button key={p} className={period === p ? 'active' : ''} onClick={() => { setPeriod(p); setInterval('1d'); fetchTerminal(ticker, p, '1d'); }}>{p}</button>
-                                                ))}
+                                    {/* ── SPLIT: Chart (left) + Options/Futures (right) ── */}
+                                    <div className="term-body-split">
+
+                                        {/* LEFT — Chart */}
+                                        <div className="tbs-left">
+                                            <div className="term-chart-card">
+                                                <div className="tcc-ctrl">
+                                                    <div className="tcc-group">
+                                                        {['1m', '5m', '15m', '1h', '1d'].map(it => (
+                                                            <button key={it} className={interval === it ? 'active' : ''} onClick={() => { setInterval(it); if (it !== '1d') setPeriod('1d'); fetchTerminal(ticker, it !== '1d' ? '1d' : period, it); }}>{it}</button>
+                                                        ))}
+                                                    </div>
+                                                    <div className="tcc-group">
+                                                        {['1d', '1wk', '1mo', '6mo', '1y'].map(p => (
+                                                            <button key={p} className={period === p ? 'active' : ''} onClick={() => { setPeriod(p); setInterval('1d'); fetchTerminal(ticker, p, '1d'); }}>{p}</button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                <div ref={chartContainerRef} className="chart-box">
+                                                    {(!d.chartData?.length) && <div className="geo-empty">No chart data for this range</div>}
+                                                </div>
                                             </div>
                                         </div>
-                                        <div ref={chartContainerRef} className="chart-box">
-                                            {(!d.chartData?.length) && <div className="geo-empty">No chart data for this range</div>}
-                                        </div>
-                                    </div>
+
+                                        {/* RIGHT — Options Chain + Futures */}
+                                        <div className="tbs-right">
+
+                                            {/* Mini Options Chain */}
+                                            <div className="tsr-panel">
+                                                <div className="tsr-hdr">
+                                                    <span className="tsr-dot" />⛓ OPTIONS CHAIN
+                                                    {options?.expiry && <span className="tsr-sub">{options.expiry} · PCR <strong style={{ color: options.pcr > 1.2 ? 'var(--pos)' : options.pcr < 0.8 ? 'var(--neg)' : 'var(--warn)' }}>{options.pcr}</strong></span>}
+                                                    {options?.source === 'THEORETICAL' && <span className="tsr-badge src-theoretical">⚗ BS</span>}
+                                                </div>
+                                                {options?.expiry ? (() => {
+                                                    const strikes = [...new Set([...(options.calls||[]).map(c=>c.strike), ...(options.puts||[]).map(p=>p.strike)])].sort((a,b)=>a-b);
+                                                    const atmI = strikes.reduce((b,s,i) => Math.abs(s-d.price) < Math.abs(strikes[b]-d.price) ? i : b, 0);
+                                                    const mini = strikes.slice(Math.max(0,atmI-4), Math.min(strikes.length, atmI+5));
+                                                    const cm = Object.fromEntries((options.calls||[]).map(c=>[c.strike,c]));
+                                                    const pm = Object.fromEntries((options.puts||[]).map(p=>[p.strike,p]));
+                                                    return (
+                                                        <>
+                                                            <div className="tsr-opt-stats">
+                                                                <div><span>MAX PAIN</span><strong className="warn">{fmtCur(options.maxPain, cur)}</strong></div>
+                                                                <div><span>CALL OI</span><strong className="neg">{((options.totalCallOI||0)/1000).toFixed(0)}K</strong></div>
+                                                                <div><span>PUT OI</span><strong className="pos">{((options.totalPutOI||0)/1000).toFixed(0)}K</strong></div>
+                                                            </div>
+                                                            <div className="tsr-chain-hdr">
+                                                                <span>LTP</span><span>IV%</span><span>OI(K)</span>
+                                                                <span className="tsr-strike-col">STRIKE</span>
+                                                                <span>OI(K)</span><span>IV%</span><span>LTP</span>
+                                                            </div>
+                                                            {mini.map(strike => {
+                                                                const c=cm[strike], p=pm[strike];
+                                                                const isAtm = Math.abs(strike-d.price)/d.price < 0.015;
+                                                                const isMp = strike === options.maxPain;
+                                                                return (
+                                                                    <div key={strike} className={`tsr-chain-row${isAtm?' atm':''}${isMp?' mp':''}`}>
+                                                                        <span className="tsr-call">{c ? c.lastPrice.toFixed(1) : '—'}</span>
+                                                                        <span className="tsr-call">{c ? (c.iv??'—')+'%' : '—'}</span>
+                                                                        <span className="tsr-call">{c ? (c.oi/1000).toFixed(0) : '—'}</span>
+                                                                        <span className={`tsr-strike${isAtm?' atm-s':''}`}>
+                                                                            {strike.toLocaleString('en-IN')}
+                                                                            {isAtm && <span className="badge atm-b">A</span>}
+                                                                            {isMp  && <span className="badge mp-b">P</span>}
+                                                                        </span>
+                                                                        <span className="tsr-put">{p ? (p.oi/1000).toFixed(0) : '—'}</span>
+                                                                        <span className="tsr-put">{p ? (p.iv??'—')+'%' : '—'}</span>
+                                                                        <span className="tsr-put">{p ? p.lastPrice.toFixed(1) : '—'}</span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                            <div className="tsr-full-btn" onClick={() => setActiveTab('options')}>
+                                                                View full chain ›
+                                                            </div>
+                                                        </>
+                                                    );
+                                                })() : <div className="geo-empty" style={{fontSize:'11px'}}>No options data for this symbol</div>}
+                                            </div>
+
+                                            {/* Related Futures / Global Context */}
+                                            <div className="tsr-panel">
+                                                <div className="tsr-hdr">
+                                                    <span className="tsr-dot" />⬡ FUTURES &amp; GLOBAL
+                                                </div>
+                                                {futures.filter(f => !['USDINR=X'].includes(f.symbol)).slice(0, 8).map((f, i) => {
+                                                    const chg = f.changePercent ?? 0;
+                                                    return (
+                                                        <div key={i} className="tsr-fut-row"
+                                                            onClick={() => handleSelect(f.symbol)}
+                                                            style={{ cursor: 'pointer' }}>
+                                                            <span className="tsr-fut-name">{(f.name||f.symbol).replace('Futures','').replace('S&P 500','SPX').replace('DOW JONES','DOW').replace('NASDAQ','NDX').trim()}</span>
+                                                            <span className="tsr-fut-price">{f.price?.toLocaleString('en-US',{maximumFractionDigits:2})}</span>
+                                                            <span className={`tsr-fut-chg ${chg>=0?'pos':'neg'}`}>{chg>=0?'▲':'▼'}{Math.abs(chg).toFixed(2)}%</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                                {rates.filter(r => ['GC=F','CL=F','SI=F','NG=F'].includes(r.symbol)).map((r,i) => {
+                                                    const chg = r.changePercent ?? 0;
+                                                    return (
+                                                        <div key={'r'+i} className="tsr-fut-row"
+                                                            onClick={() => handleSelect(r.symbol)}
+                                                            style={{ cursor: 'pointer' }}>
+                                                            <span className="tsr-fut-name">{r.name}</span>
+                                                            <span className="tsr-fut-price">{r.unit}{r.price?.toLocaleString('en-US',{maximumFractionDigits:2})}</span>
+                                                            <span className={`tsr-fut-chg ${chg>=0?'pos':'neg'}`}>{chg>=0?'▲':'▼'}{Math.abs(chg).toFixed(2)}%</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                        </div>{/* /tbs-right */}
+                                    </div>{/* /term-body-split */}
 
                                     {/* Tabs */}
                                     <div className="term-tabs">
-                                        {['technical', 'financials', 'news', 'options', 'movers'].map(tb => (
+                                        {['technical', 'financials', 'options', 'movers'].map(tb => (
                                             <button key={tb} className={activeTab === tb ? 'active' : ''} onClick={() => setActiveTab(tb)}>
-                                                {tb === 'movers' ? '⚡ MOVERS' : tb.toUpperCase()}
+                                                {tb === 'movers' ? '⚡ MOVERS' : tb === 'options' ? '⛓ OPTIONS FULL' : tb.toUpperCase()}
                                             </button>
                                         ))}
                                     </div>
@@ -1319,26 +1448,7 @@ export default function App() {
                                             </div>
                                         )}
 
-                                        {/* NEWS */}
-                                        {activeTab === 'news' && (
-                                            <div className="news-list">
-                                                {d.news?.length ? d.news.map((n, i) => (
-                                                    <a key={i} href={n.link} target="_blank" rel="noreferrer" className="news-card">
-                                                        <div className="nc-top">
-                                                            <span className="nc-sent" style={{ color: sentColor(n.sentiment), borderColor: sentColor(n.sentiment) + '55', background: sentColor(n.sentiment) + '14' }}>
-                                                                {sentLabel(n.sentiment)}
-                                                            </span>
-                                                            <span className="nc-time">{n.time}</span>
-                                                        </div>
-                                                        <div className="nc-title">{n.title}</div>
-                                                        <div className="nc-footer">
-                                                            <span className="nc-pub">{n.publisher}</span>
-                                                            <div className="nc-tags">{(n.sectors || []).map(s => <span key={s} className="nc-tag">{s}</span>)}</div>
-                                                        </div>
-                                                    </a>
-                                                )) : <div className="geo-empty">No news available</div>}
-                                            </div>
-                                        )}
+                                        {/* (news moved below) */}
 
                                         {/* OPTIONS */}
                                         {activeTab === 'options' && (
@@ -1543,7 +1653,46 @@ export default function App() {
                                                     ) : null}
                                             </div>
                                         )}
+                                    </div>{/* /term-tab-body */}
+
+                                    {/* ── STOCK NEWS with Sentiment Filter ── */}
+                                    <div className="term-news-section">
+                                        <div className="tns-hdr">
+                                            <span className="tns-title">STOCK &amp; SECTOR NEWS</span>
+                                            <span className="tns-count">{d.news?.length || 0} articles</span>
+                                            <div className="tns-filters">
+                                                {['All', 'bullish', 'bearish', 'neutral'].map(f => (
+                                                    <button key={f}
+                                                        className={`tns-filter-btn${newsFilter === f ? ' active' : ''}`}
+                                                        style={newsFilter === f && f !== 'All' ? { borderColor: sentColor(f), color: sentColor(f), background: sentColor(f) + '18' } : {}}
+                                                        onClick={() => setNewsFilter(f)}>
+                                                        {f === 'All' ? 'ALL' : sentLabel(f)}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="tns-grid">
+                                            {(() => {
+                                                const filtered = (d.news || []).filter(n => newsFilter === 'All' || n.sentiment === newsFilter);
+                                                return filtered.length ? filtered.map((n, i) => (
+                                                    <a key={i} href={n.link} target="_blank" rel="noreferrer" className="news-card">
+                                                        <div className="nc-top">
+                                                            <span className="nc-sent" style={{ color: sentColor(n.sentiment), borderColor: sentColor(n.sentiment) + '55', background: sentColor(n.sentiment) + '14' }}>
+                                                                {sentLabel(n.sentiment)}
+                                                            </span>
+                                                            <span className="nc-time">{n.time}</span>
+                                                        </div>
+                                                        <div className="nc-title">{n.title}</div>
+                                                        <div className="nc-footer">
+                                                            <span className="nc-pub">{n.publisher}</span>
+                                                            <div className="nc-tags">{(n.sectors || []).map(s => <span key={s} className="nc-tag">{s}</span>)}</div>
+                                                        </div>
+                                                    </a>
+                                                )) : <div className="geo-empty">No {newsFilter !== 'All' ? newsFilter : ''} news available</div>;
+                                            })()}
+                                        </div>
                                     </div>
+
                                 </>
                             )}
                         </div>
