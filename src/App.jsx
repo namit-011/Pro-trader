@@ -342,6 +342,9 @@ export default function App() {
     const [clock, setClock] = useState('');
 
     // HFT Model
+    const [hftLoggedIn, setHftLoggedIn] = useState(() => localStorage.getItem('hft_auth') === 'true');
+    const [hftLoginForm, setHftLoginForm] = useState({ email: '', password: '' });
+    const [hftLoginErr, setHftLoginErr] = useState('');
     const [hftData, setHftData] = useState(null);
     const [hftTicker, setHftTicker] = useState('RELIANCE.NS');
     const [hftLoading, setHftLoading] = useState(false);
@@ -350,6 +353,9 @@ export default function App() {
     });
     const [tradeForm, setTradeForm] = useState({ symbol: '', direction: 'LONG', entry: '', exit: '', qty: '', time: '', notes: '' });
     const [hftTab, setHftTab] = useState('dashboard');
+    // F&O Scanner
+    const [foData, setFoData] = useState(null);
+    const [foLoading, setFoLoading] = useState(false);
 
     // Alerts
     const [alerts, setAlerts] = useState(() => {
@@ -494,6 +500,14 @@ export default function App() {
             const r = await fetch(`${API}/hft/${encodeURIComponent(sym)}`).then(x => x.json());
             setHftData(r);
         } catch {} finally { setHftLoading(false); }
+    }, []);
+
+    const fetchFO = useCallback(async () => {
+        setFoLoading(true);
+        try {
+            const r = await fetch(`${API}/fo-scanner`).then(x => x.json());
+            setFoData(Array.isArray(r) ? r : []);
+        } catch { setFoData([]); } finally { setFoLoading(false); }
     }, []);
 
     // Check price alerts against live data
@@ -1848,7 +1862,37 @@ export default function App() {
                 )}
 
                 {/* ════ HFT MODEL VIEW ════ */}
-                {activeView === 'hftmodel' && (() => {
+                {activeView === 'hftmodel' && !hftLoggedIn && (
+                    <div className="hft-login-wrap">
+                        <div className="hft-login-box">
+                            <div className="hft-login-icon">◈</div>
+                            <div className="hft-login-title">HFT MODEL <span className="hft-private-badge">PRIVATE</span></div>
+                            <div className="hft-login-sub">Restricted access · Authorized personnel only</div>
+                            <form className="hft-login-form" onSubmit={e => {
+                                e.preventDefault();
+                                if (hftLoginForm.email === '01nami01@gmail.com' && hftLoginForm.password === 'HFT@2026') {
+                                    localStorage.setItem('hft_auth', 'true');
+                                    setHftLoggedIn(true);
+                                    setHftLoginErr('');
+                                } else {
+                                    setHftLoginErr('Invalid credentials. Access denied.');
+                                }
+                            }}>
+                                <div className="hft-lf-field">
+                                    <label>EMAIL</label>
+                                    <input type="email" value={hftLoginForm.email} onChange={e => setHftLoginForm(f => ({...f, email: e.target.value}))} placeholder="your@email.com" autoComplete="email" />
+                                </div>
+                                <div className="hft-lf-field">
+                                    <label>PASSWORD</label>
+                                    <input type="password" value={hftLoginForm.password} onChange={e => setHftLoginForm(f => ({...f, password: e.target.value}))} placeholder="••••••••" autoComplete="current-password" />
+                                </div>
+                                {hftLoginErr && <div className="hft-login-err">{hftLoginErr}</div>}
+                                <button type="submit" className="hft-login-btn">AUTHENTICATE</button>
+                            </form>
+                        </div>
+                    </div>
+                )}
+                {activeView === 'hftmodel' && hftLoggedIn && (() => {
                     const closedTrades = trades.filter(t => t.exit && t.exit !== '');
                     const pnlList = closedTrades.map(t => {
                         const mult = t.direction === 'LONG' ? 1 : -1;
@@ -1910,9 +1954,10 @@ export default function App() {
                                     </form>
                                 </div>
                                 <div className="hft-tabs">
-                                    {[['dashboard','⊞ DASHBOARD'],['signals','⊿ SIGNALS'],['journal','✎ JOURNAL'],['patterns','◉ PATTERNS']].map(([tab,label]) => (
-                                        <button key={tab} className={`hft-tab-btn${hftTab === tab ? ' active' : ''}`} onClick={() => { setHftTab(tab); if (tab === 'signals') fetchHFT(hftTicker); }}>{label}</button>
+                                    {[['dashboard','⊞ DASHBOARD'],['signals','⊿ SIGNALS'],['fo','⚡ F&O MODEL'],['journal','✎ JOURNAL'],['patterns','◉ PATTERNS']].map(([tab,label]) => (
+                                        <button key={tab} className={`hft-tab-btn${hftTab === tab ? ' active' : ''}${tab === 'fo' ? ' hft-fo-tab' : ''}`} onClick={() => { setHftTab(tab); if (tab === 'signals') fetchHFT(hftTicker); if (tab === 'fo') fetchFO(); }}>{label}</button>
                                     ))}
+                                    <button className="hft-logout-btn" onClick={() => { localStorage.removeItem('hft_auth'); setHftLoggedIn(false); }}>⏻ LOGOUT</button>
                                 </div>
                             </div>
 
@@ -2186,6 +2231,115 @@ export default function App() {
                                             })
                                         }
                                     </div>
+                                </div>
+                            )}
+
+                            {/* F&O MODEL TAB */}
+                            {hftTab === 'fo' && (
+                                <div className="hft-fo-wrap">
+                                    <div className="hft-fo-header">
+                                        <div className="hft-fo-title">
+                                            <span className="hft-fo-icon">⚡</span>
+                                            <div>
+                                                <div className="hft-fo-main">F&O INTRADAY SCANNER</div>
+                                                <div className="hft-fo-sub">Black-Scholes premium · ATR stops · EMA trend filter · Next weekly expiry</div>
+                                            </div>
+                                        </div>
+                                        <button className="hft-fo-refresh" onClick={fetchFO} disabled={foLoading}>
+                                            {foLoading ? '⟳ SCANNING...' : '⟳ REFRESH'}
+                                        </button>
+                                    </div>
+
+                                    {foLoading && (
+                                        <div className="hft-fo-loading">
+                                            <div className="hft-fo-spinner"></div>
+                                            <span>Scanning 30 F&O stocks · Computing signals...</span>
+                                        </div>
+                                    )}
+
+                                    {!foLoading && !foData && (
+                                        <div className="hft-fo-empty">
+                                            <div style={{ fontSize: 36, opacity: 0.3 }}>⚡</div>
+                                            <div>Click REFRESH to scan F&O opportunities</div>
+                                            <div style={{ fontSize: 10, opacity: 0.5 }}>Analyzes 30 liquid NSE F&O stocks for CE/PE setups</div>
+                                        </div>
+                                    )}
+
+                                    {!foLoading && foData && foData.length === 0 && (
+                                        <div className="hft-fo-empty">
+                                            <div style={{ fontSize: 36, opacity: 0.3 }}>⊘</div>
+                                            <div>No high-conviction F&O setups found right now</div>
+                                            <div style={{ fontSize: 10, opacity: 0.5 }}>Try again during market hours for live signals</div>
+                                        </div>
+                                    )}
+
+                                    {!foLoading && foData && foData.length > 0 && (
+                                        <>
+                                            <div className="hft-fo-legend">
+                                                <span className="fo-leg-ce">■ CE = CALL (Bullish)</span>
+                                                <span className="fo-leg-pe">■ PE = PUT (Bearish)</span>
+                                                <span className="fo-leg-note">Premium based on Black-Scholes · Strikes adjusted to market lot · ATR-based stops</span>
+                                            </div>
+                                            <div className="hft-fo-table-wrap">
+                                                <table className="hft-fo-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>SYMBOL</th>
+                                                            <th>LTP</th>
+                                                            <th>CHG%</th>
+                                                            <th>TYPE</th>
+                                                            <th>STRIKE</th>
+                                                            <th>PREM (ATM)</th>
+                                                            <th>PREM (OTM)</th>
+                                                            <th>RSI</th>
+                                                            <th>IV%</th>
+                                                            <th>TREND</th>
+                                                            <th>STOP (LTP)</th>
+                                                            <th>TGT (LTP)</th>
+                                                            <th>OPT TGT</th>
+                                                            <th>OPT SL</th>
+                                                            <th>SCORE</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {foData.map(s => (
+                                                            <tr key={s.sym} className={s.signal === 'CE' ? 'fo-row-ce' : 'fo-row-pe'}
+                                                                onClick={() => { handleSelect(s.sym); setActiveView('terminal'); }}>
+                                                                <td className="fo-sym">
+                                                                    <span className="fo-sym-name">{s.name}</span>
+                                                                    <span className="fo-sym-tick">{s.sym.replace('.NS','')}</span>
+                                                                </td>
+                                                                <td className="fo-price">₹{s.price?.toLocaleString('en-IN')}</td>
+                                                                <td className={s.change >= 0 ? 'fo-pos' : 'fo-neg'}>{s.change >= 0 ? '+' : ''}{s.change}%</td>
+                                                                <td><span className={`fo-type-badge fo-${s.signal.toLowerCase()}`}>{s.signal}</span></td>
+                                                                <td className="fo-mono">{s.strike}</td>
+                                                                <td className="fo-mono fo-prem">₹{s.premium}</td>
+                                                                <td className="fo-mono fo-prem-otm">₹{s.premOtm}</td>
+                                                                <td className={s.rsi < 35 ? 'fo-pos' : s.rsi > 65 ? 'fo-neg' : 'fo-neutral'}>{s.rsi}</td>
+                                                                <td className="fo-mono">{s.iv}%</td>
+                                                                <td>
+                                                                    <span className={`fo-trend-badge fo-trend-${s.emaTrend?.toLowerCase()}`}>{s.emaTrend}</span>
+                                                                </td>
+                                                                <td className="fo-mono fo-neg">₹{s.stopLoss}</td>
+                                                                <td className="fo-mono fo-pos">₹{s.target}</td>
+                                                                <td className="fo-mono fo-pos">₹{s.optTarget}</td>
+                                                                <td className="fo-mono fo-neg">₹{s.optStop}</td>
+                                                                <td>
+                                                                    <div className="fo-score-bar">
+                                                                        <div className="fo-score-fill" style={{ width: `${Math.min(s.strength * 2, 100)}%`, background: s.signal === 'CE' ? 'var(--pos)' : 'var(--neg)' }}></div>
+                                                                        <span className="fo-score-val">{s.strength}</span>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div className="hft-fo-disclaimer">
+                                                ⚠ Signals are algorithmic. Not investment advice. Verify with your broker before trading. F&O involves substantial risk.
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
 

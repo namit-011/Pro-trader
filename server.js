@@ -822,6 +822,58 @@ const SIG_STOCKS = [
     { sym: 'M&M.NS',        name: 'Mahindra & Mahindra',     cls: 'Auto'         },
     { sym: 'UPL.NS',        name: 'UPL Limited',             cls: 'Agro'         },
     { sym: 'BRITANNIA.NS',  name: 'Britannia Industries',    cls: 'FMCG'        },
+    // NIFTY Next 50 + F&O active additions
+    { sym: 'BANKBARODA.NS', name: 'Bank of Baroda',          cls: 'PSU Banking'  },
+    { sym: 'PNB.NS',        name: 'Punjab National Bank',    cls: 'PSU Banking'  },
+    { sym: 'CANBK.NS',      name: 'Canara Bank',             cls: 'PSU Banking'  },
+    { sym: 'UNIONBANK.NS',  name: 'Union Bank of India',     cls: 'PSU Banking'  },
+    { sym: 'FEDERALBNK.NS', name: 'Federal Bank',            cls: 'Banking'      },
+    { sym: 'IDFCFIRSTB.NS', name: 'IDFC First Bank',         cls: 'Banking'      },
+    { sym: 'BANDHANBNK.NS', name: 'Bandhan Bank',            cls: 'Banking'      },
+    { sym: 'AUBANK.NS',     name: 'AU Small Finance Bank',   cls: 'Banking'      },
+    { sym: 'CHOLAFIN.NS',   name: 'Cholamandalam Finance',   cls: 'NBFC'         },
+    { sym: 'LICHSGFIN.NS',  name: 'LIC Housing Finance',     cls: 'NBFC'         },
+    { sym: 'MUTHOOTFIN.NS', name: 'Muthoot Finance',         cls: 'NBFC'         },
+    { sym: 'PIDILITIND.NS', name: 'Pidilite Industries',     cls: 'Consumer'     },
+    { sym: 'BERGEPAINT.NS', name: 'Berger Paints',           cls: 'Consumer'     },
+    { sym: 'HAVELLS.NS',    name: 'Havells India',           cls: 'Consumer'     },
+    { sym: 'SIEMENS.NS',    name: 'Siemens India',           cls: 'Capital Goods'},
+    { sym: 'ABB.NS',        name: 'ABB India',               cls: 'Capital Goods'},
+    { sym: 'BOSCHLTD.NS',   name: 'Bosch India',             cls: 'Auto'         },
+    { sym: 'CGPOWER.NS',    name: 'CG Power',                cls: 'Capital Goods'},
+    { sym: 'POLYCAB.NS',    name: 'Polycab India',           cls: 'Capital Goods'},
+    { sym: 'TATAPOWER.NS',  name: 'Tata Power',              cls: 'Power'        },
+    { sym: 'TORNTPHARM.NS', name: 'Torrent Pharma',          cls: 'Pharma'       },
+    { sym: 'LUPIN.NS',      name: 'Lupin Limited',           cls: 'Pharma'       },
+    { sym: 'BIOCON.NS',     name: 'Biocon Limited',          cls: 'Pharma'       },
+    { sym: 'ALKEM.NS',      name: 'Alkem Laboratories',      cls: 'Pharma'       },
+    { sym: 'AUROPHARMA.NS', name: 'Aurobindo Pharma',        cls: 'Pharma'       },
+    { sym: 'CONCOR.NS',     name: 'Container Corp of India', cls: 'Logistics'    },
+    { sym: 'IRCTC.NS',      name: 'Indian Railway Catering', cls: 'PSU Services' },
+    { sym: 'RECLTD.NS',     name: 'REC Limited',             cls: 'PSU Finance'  },
+    { sym: 'PFC.NS',        name: 'Power Finance Corp',      cls: 'PSU Finance'  },
+    { sym: 'BHEL.NS',       name: 'Bharat Heavy Electricals',cls: 'PSU Capital'  },
+    { sym: 'SAIL.NS',       name: 'Steel Authority of India',cls: 'Metals'       },
+    { sym: 'VEDL.NS',       name: 'Vedanta Limited',         cls: 'Metals'       },
+    { sym: 'HINDZINC.NS',   name: 'Hindustan Zinc',          cls: 'Metals'       },
+    { sym: 'BALKRISIND.NS', name: 'Balkrishna Industries',   cls: 'Auto'         },
+    { sym: 'DEEPAKNTR.NS',  name: 'Deepak Nitrite',          cls: 'Chemicals'    },
+    { sym: 'PIIND.NS',      name: 'PI Industries',           cls: 'Agro'         },
+    { sym: 'LTIM.NS',       name: 'LTIMindtree',             cls: 'IT'           },
+    { sym: 'PERSISTENT.NS', name: 'Persistent Systems',      cls: 'IT'           },
+    { sym: 'COFORGE.NS',    name: 'Coforge Limited',         cls: 'IT'           },
+    { sym: 'MPHASIS.NS',    name: 'Mphasis Limited',         cls: 'IT'           },
+    { sym: 'OFSS.NS',       name: 'Oracle Financial Services',cls: 'IT'          },
+    { sym: 'NAUKRI.NS',     name: 'Info Edge (Naukri)',      cls: 'Internet'     },
+    { sym: 'ZOMATO.NS',     name: 'Zomato',                  cls: 'Internet'     },
+    { sym: 'PAYTM.NS',      name: 'One 97 Comm (Paytm)',     cls: 'Fintech'      },
+    { sym: 'ANGELONE.NS',   name: 'Angel One',               cls: 'Fintech'      },
+    { sym: 'DMART.NS',      name: 'Avenue Supermarts (DMart)',cls: 'Retail'       },
+    { sym: 'PAGEIND.NS',    name: 'Page Industries (Jockey)',cls: 'Consumer'     },
+    { sym: 'ASTRAL.NS',     name: 'Astral Limited',          cls: 'Consumer'     },
+    { sym: 'LICI.NS',       name: 'LIC of India',            cls: 'Insurance'    },
+    { sym: 'ICICIGI.NS',    name: 'ICICI Lombard Insurance', cls: 'Insurance'    },
+    { sym: 'HDFCAMC.NS',    name: 'HDFC AMC',                cls: 'Asset Mgmt'   },
 ];
 
 const CLS_DRIVERS = {
@@ -1348,6 +1400,200 @@ app.get('/api/hft/:ticker', async (req, res) => {
             volSpikeRatio,
             regimes: atrPct ? (atrPct < 0.5 ? 'LOW_VOL' : atrPct < 1.5 ? 'NORMAL' : 'HIGH_VOL') : 'UNKNOWN',
         });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── F&O Intraday Scanner ──
+const FO_STOCKS = [
+    { sym: 'RELIANCE.NS', name: 'Reliance' }, { sym: 'HDFCBANK.NS', name: 'HDFC Bank' },
+    { sym: 'INFY.NS', name: 'Infosys' }, { sym: 'TCS.NS', name: 'TCS' },
+    { sym: 'ICICIBANK.NS', name: 'ICICI Bank' }, { sym: 'SBIN.NS', name: 'SBI' },
+    { sym: 'AXISBANK.NS', name: 'Axis Bank' }, { sym: 'KOTAKBANK.NS', name: 'Kotak Bank' },
+    { sym: 'BAJFINANCE.NS', name: 'Bajaj Finance' }, { sym: 'TATAMOTORS.NS', name: 'Tata Motors' },
+    { sym: 'TATASTEEL.NS', name: 'Tata Steel' }, { sym: 'WIPRO.NS', name: 'Wipro' },
+    { sym: 'HCLTECH.NS', name: 'HCL Tech' }, { sym: 'SUNPHARMA.NS', name: 'Sun Pharma' },
+    { sym: 'ONGC.NS', name: 'ONGC' }, { sym: 'MARUTI.NS', name: 'Maruti' },
+    { sym: 'ADANIPORTS.NS', name: 'Adani Ports' }, { sym: 'HINDALCO.NS', name: 'Hindalco' },
+    { sym: 'NTPC.NS', name: 'NTPC' }, { sym: 'POWERGRID.NS', name: 'Power Grid' },
+    { sym: 'TECHM.NS', name: 'Tech Mahindra' }, { sym: 'BHARTIARTL.NS', name: 'Airtel' },
+    { sym: 'BPCL.NS', name: 'BPCL' }, { sym: 'GRASIM.NS', name: 'Grasim' },
+    { sym: 'INDUSINDBK.NS', name: 'IndusInd Bank' }, { sym: 'VEDL.NS', name: 'Vedanta' },
+    { sym: 'TATAPOWER.NS', name: 'Tata Power' }, { sym: 'BANKBARODA.NS', name: 'Bank of Baroda' },
+    { sym: 'ZOMATO.NS', name: 'Zomato' }, { sym: 'LTIM.NS', name: 'LTIMindtree' },
+];
+
+// Normal CDF approximation (Abramowitz & Stegun)
+const normCdf = (z) => {
+    if (z < -6) return 0; if (z > 6) return 1;
+    const k = 1 / (1 + 0.2316419 * Math.abs(z));
+    const poly = k * (0.319381530 + k * (-0.356563782 + k * (1.781477937 + k * (-1.821255978 + k * 1.330274429))));
+    const p = 1 - (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * z * z) * poly;
+    return z >= 0 ? p : 1 - p;
+};
+const bsCall = (S, K, T, r, sigma) => {
+    if (T <= 0 || sigma <= 0) return Math.max(S - K, 0);
+    const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
+    const d2 = d1 - sigma * Math.sqrt(T);
+    return S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2);
+};
+const bsPut = (S, K, T, r, sigma) => {
+    if (T <= 0 || sigma <= 0) return Math.max(K - S, 0);
+    const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
+    const d2 = d1 - sigma * Math.sqrt(T);
+    return K * Math.exp(-r * T) * normCdf(-d2) - S * normCdf(-d1);
+};
+
+let foCache = null, foCacheTs = 0;
+
+app.get('/api/fo-scanner', async (_req, res) => {
+    if (foCache && Date.now() - foCacheTs < 5 * 60 * 1000) return res.json(foCache);
+    try {
+        const syms = FO_STOCKS.map(s => s.sym);
+        const quotes = await yahooFinance.quote(syms).catch(() => []);
+        const qMap = {};
+        (Array.isArray(quotes) ? quotes : []).forEach(q => { if (q?.symbol) qMap[q.symbol] = q; });
+
+        const p5d = toPeriod1('5d');
+        const charts = await Promise.allSettled(
+            syms.map(sym => yahooFinance.chart(sym, { interval: '15m', period1: p5d }).catch(() => null))
+        );
+
+        const R = 0.065; // India risk-free rate (RBI repo ~6.5%)
+        // Time to nearest expiry: assume weekly expiry on Thursday
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0=Sun,1=Mon,...,4=Thu
+        const daysToExpiry = ((4 - dayOfWeek + 7) % 7) || 7; // days to next Thursday
+        const T = Math.max(daysToExpiry / 365, 1 / 365); // fraction of year
+
+        const results = FO_STOCKS.map(({ sym, name }, i) => {
+            const q = qMap[sym] || {};
+            const price = q.regularMarketPrice;
+            if (!price) return null;
+
+            const chartData = charts[i].status === 'fulfilled' ? charts[i].value : null;
+            const candles = (chartData?.quotes || []).filter(x => x && x.close != null);
+            if (candles.length < 14) return null;
+
+            const cl = candles.map(x => x.close);
+            const hi = candles.map(x => x.high);
+            const lo = candles.map(x => x.low);
+            const vo = candles.map(x => x.volume || 0);
+
+            // RSI
+            const rsiArr = RSI.calculate({ values: cl, period: 14 });
+            const rsi = rsiArr.length ? rsiArr[rsiArr.length - 1] : 50;
+
+            // EMA 9/21 trend
+            const ema9 = EMA.calculate({ values: cl, period: 9 });
+            const ema21 = EMA.calculate({ values: cl, period: 21 });
+            const emaTrend = (ema9.length && ema21.length)
+                ? (ema9[ema9.length-1] > ema21[ema21.length-1] ? 'UP' : 'DOWN')
+                : 'FLAT';
+
+            // ATR (14-period)
+            const atrRaw = ADX.calculate({ high: hi, low: lo, close: cl, period: 14 });
+            const atr = atrRaw.length ? (atrRaw[atrRaw.length-1].atr || null) : null;
+
+            // VWAP
+            let vwap = null;
+            if (vo.some(v => v > 0)) {
+                const tp = candles.map(x => (x.high + x.low + x.close) / 3);
+                const totalPV = tp.reduce((s, p, j) => s + p * vo[j], 0);
+                const totalV = vo.reduce((a, b) => a + b, 0);
+                vwap = totalV > 0 ? totalPV / totalV : null;
+            }
+
+            // Historical volatility (annualized from 15m returns)
+            const returns = cl.slice(1).map((c, j) => Math.log(c / cl[j]));
+            const retMean = returns.reduce((a, b) => a + b, 0) / returns.length;
+            const retVar = returns.reduce((s, r) => s + Math.pow(r - retMean, 2), 0) / returns.length;
+            const periodsPerYear = 26 * 252; // 26 x 15m bars per day * ~252 trading days
+            const sigma = Math.sqrt(retVar * periodsPerYear);
+            const ivEst = Math.max(0.15, Math.min(sigma, 2.0)); // clamp 15%-200%
+
+            // Signal scoring
+            let score = 0;
+            let signal = 'NEUTRAL';
+
+            // RSI signals
+            if (rsi < 30) score += 25;
+            else if (rsi < 40) score += 15;
+            else if (rsi > 70) score -= 25;
+            else if (rsi > 60) score -= 15;
+
+            // Trend alignment
+            if (emaTrend === 'UP') score += 15;
+            if (emaTrend === 'DOWN') score -= 15;
+
+            // VWAP alignment
+            if (vwap && price > vwap * 1.002) score += 10;
+            if (vwap && price < vwap * 0.998) score -= 10;
+
+            // Volume spike
+            const avgVol = vo.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(1, vo.length - 1);
+            const lastVol = vo[vo.length - 1];
+            const volRatio = avgVol > 0 ? lastVol / avgVol : 1;
+            if (volRatio > 2) score += 15;
+            else if (volRatio > 1.5) score += 8;
+
+            // Price distance from 52W
+            const w52Low = q.fiftyTwoWeekLow;
+            const w52High = q.fiftyTwoWeekHigh;
+            if (w52Low && w52High) {
+                const range = w52High - w52Low;
+                const pos = range > 0 ? (price - w52Low) / range : 0.5;
+                if (pos < 0.2) score += 10; // near 52W low = potential bounce
+                if (pos > 0.85) score += 5; // near 52W high = momentum
+            }
+
+            // Determine option type
+            if (score >= 30) signal = 'CE'; // Call Option
+            else if (score <= -30) signal = 'PE'; // Put Option
+            else if (score >= 15) signal = 'CE';
+            else if (score <= -15) signal = 'PE';
+            else return null; // skip low-signal stocks
+
+            // ATM strike (nearest round number: 50 for most, 100 for high-price stocks)
+            const strikeInterval = price > 2000 ? 100 : price > 500 ? 50 : 20;
+            const atmStrike = Math.round(price / strikeInterval) * strikeInterval;
+            const otmStrike = signal === 'CE'
+                ? atmStrike + strikeInterval
+                : atmStrike - strikeInterval;
+
+            // Theoretical premium (Black-Scholes)
+            const premAtm = signal === 'CE'
+                ? bsCall(price, atmStrike, T, R, ivEst)
+                : bsPut(price, atmStrike, T, R, ivEst);
+            const premOtm = signal === 'CE'
+                ? bsCall(price, otmStrike, T, R, ivEst)
+                : bsPut(price, otmStrike, T, R, ivEst);
+
+            // Stop loss & target (ATR-based)
+            const atrVal = atr || (price * 0.01);
+            const stopLoss = signal === 'CE'
+                ? +(price - atrVal * 1.5).toFixed(2)
+                : +(price + atrVal * 1.5).toFixed(2);
+            const target = signal === 'CE'
+                ? +(price + atrVal * 3).toFixed(2)
+                : +(price - atrVal * 3).toFixed(2);
+            const optTarget = +(premAtm * 2.5).toFixed(2);
+            const optStop = +(premAtm * 0.4).toFixed(2);
+
+            const strength = signal === 'CE' ? score : Math.abs(score);
+
+            return {
+                sym, name, price: +price.toFixed(2), signal, rsi: +rsi.toFixed(1),
+                emaTrend, vwap: vwap ? +vwap.toFixed(2) : null, volRatio: +volRatio.toFixed(2),
+                atr: atr ? +atr.toFixed(2) : null, iv: +(ivEst * 100).toFixed(1),
+                strike: atmStrike, otmStrike, premium: +premAtm.toFixed(2), premOtm: +premOtm.toFixed(2),
+                stopLoss, target, optTarget, optStop, strength,
+                change: q.regularMarketChangePercent ? +q.regularMarketChangePercent.toFixed(2) : 0,
+            };
+        }).filter(Boolean).sort((a, b) => b.strength - a.strength).slice(0, 15);
+
+        foCache = results;
+        foCacheTs = Date.now();
+        res.json(results);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
