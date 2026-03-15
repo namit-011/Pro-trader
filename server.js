@@ -1650,6 +1650,35 @@ app.get('/api/fo-scanner', async (_req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Symbol Search (autocomplete) ──
+app.get('/api/search', async (req, res) => {
+    const q = (req.query.q || '').trim();
+    if (!q || q.length < 1) return res.json([]);
+    try {
+        // 1. Search Yahoo Finance
+        const result = await yahooFinance.search(q, { newsCount: 0, quotesCount: 15 }).catch(() => ({ quotes: [] }));
+        const yf = (result.quotes || [])
+            .filter(r => r.isYahooFinance && ['EQUITY','INDEX','ETF','MUTUALFUND'].includes(r.quoteType))
+            .map(r => ({
+                symbol: r.symbol,
+                name: r.shortname || r.longname || r.symbol,
+                exchange: r.exchange === 'NSI' ? 'NSE' : r.exchange === 'BOM' ? 'BSE' : (r.exchange || ''),
+                type: r.quoteType,
+            }));
+
+        // 2. Also filter SIG_STOCKS locally (instant, no network)
+        const ql = q.toLowerCase();
+        const local = SIG_STOCKS
+            .filter(s => s.name.toLowerCase().includes(ql) || s.sym.toLowerCase().includes(ql))
+            .map(s => ({ symbol: s.sym, name: s.name, exchange: 'NSE', type: 'EQUITY' }));
+
+        // Merge: local first (prioritize known NSE stocks), then Yahoo results not already covered
+        const seen = new Set(local.map(s => s.symbol));
+        const merged = [...local, ...yf.filter(r => !seen.has(r.symbol))].slice(0, 10);
+        res.json(merged);
+    } catch { res.json([]); }
+});
+
 // Serve React build in production
 if (process.env.NODE_ENV === 'production') {
     // Cache static assets for 7 days (hashed filenames change on rebuild)

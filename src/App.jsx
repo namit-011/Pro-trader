@@ -321,7 +321,11 @@ export default function App() {
     const [period, setPeriod]     = useState('1d');
     const [interval, setInterval] = useState('5m');
     const [newsFilter, setNewsFilter] = useState('All'); // terminal news sentiment filter
-    const [search, setSearch]     = useState('RELIANCE.NS');
+    const [search, setSearch]     = useState('');
+    const [searchSugg, setSearchSugg] = useState([]);
+    const [searchHl, setSearchHl] = useState(-1);
+    const searchDebounceRef = useRef(null);
+    const searchDropRef = useRef(null);
     const [selectedExpiry, setSelectedExpiry] = useState(null);
     const selectedExpiryRef = useRef(null);
 
@@ -523,6 +527,18 @@ export default function App() {
         } catch { setFoData([]); } finally { setFoLoading(false); }
     }, []);
 
+    const fetchSuggestions = useCallback((q) => {
+        clearTimeout(searchDebounceRef.current);
+        setSearchHl(-1);
+        if (!q || q.length < 1) { setSearchSugg([]); return; }
+        searchDebounceRef.current = setTimeout(async () => {
+            try {
+                const r = await fetch(`${API}/search?q=${encodeURIComponent(q)}`).then(x => x.json());
+                setSearchSugg(Array.isArray(r) ? r : []);
+            } catch { setSearchSugg([]); }
+        }, 280);
+    }, []);
+
     // Check price alerts against live data
     useEffect(() => {
         const check = () => {
@@ -620,11 +636,18 @@ export default function App() {
         if (sym && !sym.includes('.') && !sym.startsWith('^') && !sym.endsWith('=F') && !sym.endsWith('=X')) {
             sym = sym + '.NS';
         }
-        setTicker(sym); setSearch(sym);
+        setTicker(sym);
         setSelectedExpiry(null); selectedExpiryRef.current = null;
         setPeriod('1d'); setInterval('5m');
         fetchTerminal(sym, '1d', '5m');
         setActiveView('terminal');
+    };
+
+    const commitSearch = (sym) => {
+        setSearch('');
+        setSearchSugg([]);
+        setSearchHl(-1);
+        handleSelect(sym);
     };
 
     // Market status (NSE: Mon-Fri 09:15-15:30 IST = UTC+5:30)
@@ -695,10 +718,41 @@ export default function App() {
 
                 <div className="gh-right">
                     {activeView !== 'home' && (
-                    <form className="gh-search" onSubmit={e => { e.preventDefault(); handleSelect(search); setActiveView('terminal'); }}>
-                        <input value={search} onChange={e => setSearch(e.target.value.toUpperCase())} placeholder="Symbol · e.g. RELIANCE.NS" className="gh-search-input" />
-                        <button type="submit" className="gh-search-btn" aria-label="Search">→</button>
-                    </form>
+                    <div className="gh-search-wrap" ref={searchDropRef}>
+                        <form className="gh-search" onSubmit={e => {
+                            e.preventDefault();
+                            if (searchHl >= 0 && searchSugg[searchHl]) { commitSearch(searchSugg[searchHl].symbol); }
+                            else if (search.trim()) { commitSearch(search.trim()); }
+                        }}>
+                            <span className="gh-search-icon">⌕</span>
+                            <input
+                                value={search}
+                                onChange={e => { setSearch(e.target.value); fetchSuggestions(e.target.value); }}
+                                onKeyDown={e => {
+                                    if (e.key === 'ArrowDown') { e.preventDefault(); setSearchHl(h => Math.min(h + 1, searchSugg.length - 1)); }
+                                    else if (e.key === 'ArrowUp') { e.preventDefault(); setSearchHl(h => Math.max(h - 1, -1)); }
+                                    else if (e.key === 'Escape') { setSearchSugg([]); setSearch(''); }
+                                    else if (e.key === 'Enter' && searchHl >= 0 && searchSugg[searchHl]) { e.preventDefault(); commitSearch(searchSugg[searchHl].symbol); }
+                                }}
+                                onBlur={() => setTimeout(() => setSearchSugg([]), 200)}
+                                placeholder="Search stock or index…"
+                                className="gh-search-input"
+                                autoComplete="off"
+                            />
+                        </form>
+                        {searchSugg.length > 0 && (
+                            <div className="search-dropdown">
+                                {searchSugg.map((s, i) => (
+                                    <div key={s.symbol} className={`sd-item${i === searchHl ? ' sd-hl' : ''}`}
+                                        onMouseDown={() => commitSearch(s.symbol)}>
+                                        <span className="sd-name">{s.name}</span>
+                                        <span className="sd-sym">{s.symbol.replace('.NS','').replace('.BO','')}</span>
+                                        {s.exchange && <span className="sd-exch">{s.exchange}</span>}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     )}
                     <div className="gh-alerts-btn" ref={alertsRef} onClick={() => setAlertsOpen(o => !o)}>
                         🔔{firedAlerts.length > 0 && <span className="alert-badge">{firedAlerts.length}</span>}
@@ -829,18 +883,42 @@ export default function App() {
                                 <span className="hbc-logo-text">Terminal<span>X</span></span>
                                 <span className="hbc-logo-sub">PROFESSIONAL MARKET TERMINAL</span>
                             </div>
-                            <form className="hbc-search" onSubmit={e => { e.preventDefault(); handleSelect(search); }}>
-                                <span className="hbc-search-label">SYMBOL&gt;</span>
-                                <input
-                                    value={search}
-                                    onChange={e => setSearch(e.target.value.toUpperCase())}
-                                    placeholder="RELIANCE · HDFCBANK · ^NSEI · AAPL · GC=F"
-                                    className="hbc-search-input"
-                                    autoCapitalize="characters"
-                                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleSelect(search))}
-                                />
-                                <button type="submit" className="hbc-search-btn">GO ›</button>
-                            </form>
+                            <div className="hbc-search-wrap">
+                                <form className="hbc-search" onSubmit={e => {
+                                    e.preventDefault();
+                                    if (searchHl >= 0 && searchSugg[searchHl]) { commitSearch(searchSugg[searchHl].symbol); }
+                                    else if (search.trim()) { commitSearch(search.trim()); }
+                                }}>
+                                    <span className="hbc-search-label">⌕</span>
+                                    <input
+                                        value={search}
+                                        onChange={e => { setSearch(e.target.value); fetchSuggestions(e.target.value); }}
+                                        placeholder="Search by name · e.g. Reliance, HDFC, Nifty…"
+                                        className="hbc-search-input"
+                                        autoComplete="off"
+                                        onKeyDown={e => {
+                                            if (e.key === 'ArrowDown') { e.preventDefault(); setSearchHl(h => Math.min(h + 1, searchSugg.length - 1)); }
+                                            else if (e.key === 'ArrowUp') { e.preventDefault(); setSearchHl(h => Math.max(h - 1, -1)); }
+                                            else if (e.key === 'Escape') { setSearchSugg([]); setSearch(''); }
+                                            else if (e.key === 'Enter' && searchHl >= 0 && searchSugg[searchHl]) { e.preventDefault(); commitSearch(searchSugg[searchHl].symbol); }
+                                        }}
+                                        onBlur={() => setTimeout(() => setSearchSugg([]), 200)}
+                                    />
+                                    <button type="submit" className="hbc-search-btn">GO ›</button>
+                                </form>
+                                {searchSugg.length > 0 && (
+                                    <div className="search-dropdown hbc-dropdown">
+                                        {searchSugg.map((s, i) => (
+                                            <div key={s.symbol} className={`sd-item${i === searchHl ? ' sd-hl' : ''}`}
+                                                onMouseDown={() => commitSearch(s.symbol)}>
+                                                <span className="sd-name">{s.name}</span>
+                                                <span className="sd-sym">{s.symbol.replace('.NS','').replace('.BO','')}</span>
+                                                {s.exchange && <span className="sd-exch">{s.exchange}</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             <div className="hbc-quick">
                                 {[
                                     ['RELIANCE','RELIANCE.NS'],['TCS','TCS.NS'],['HDFCBANK','HDFCBANK.NS'],
