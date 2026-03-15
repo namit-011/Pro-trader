@@ -681,10 +681,12 @@ export default function App() {
                 </nav>
 
                 <div className="gh-right">
-                    <form className="gh-search" onSubmit={e => { e.preventDefault(); handleSelect(search); }}>
-                        <input value={search} onChange={e => setSearch(e.target.value.toUpperCase())} placeholder="RELIANCE · AAPL · ^NSEI · GC=F" />
-                        <button type="submit">→</button>
+                    {activeView !== 'home' && (
+                    <form className="gh-search" onSubmit={e => { e.preventDefault(); handleSelect(search); setActiveView('terminal'); }}>
+                        <input value={search} onChange={e => setSearch(e.target.value.toUpperCase())} placeholder="Symbol · e.g. RELIANCE.NS" className="gh-search-input" />
+                        <button type="submit" className="gh-search-btn" aria-label="Search">→</button>
                     </form>
+                    )}
                     <div className="gh-alerts-btn" onClick={() => setAlertsOpen(o => !o)}>
                         🔔{firedAlerts.length > 0 && <span className="alert-badge">{firedAlerts.length}</span>}
                         {alertsOpen && (
@@ -1870,7 +1872,9 @@ export default function App() {
                             <div className="hft-login-sub">Restricted access · Authorized personnel only</div>
                             <form className="hft-login-form" onSubmit={e => {
                                 e.preventDefault();
-                                if (hftLoginForm.email === '01nami01@gmail.com' && hftLoginForm.password === 'HFT@2026') {
+                                const emailOk = hftLoginForm.email.trim().toLowerCase() === '01nami01@gmail.com';
+                                const passOk  = hftLoginForm.password.trim() === 'HFT@2026';
+                                if (emailOk && passOk) {
                                     localStorage.setItem('hft_auth', 'true');
                                     setHftLoggedIn(true);
                                     setHftLoginErr('');
@@ -1880,7 +1884,7 @@ export default function App() {
                             }}>
                                 <div className="hft-lf-field">
                                     <label>EMAIL</label>
-                                    <input type="email" value={hftLoginForm.email} onChange={e => setHftLoginForm(f => ({...f, email: e.target.value}))} placeholder="your@email.com" autoComplete="email" />
+                                    <input type="text" value={hftLoginForm.email} onChange={e => setHftLoginForm(f => ({...f, email: e.target.value}))} placeholder="your@email.com" autoComplete="username" />
                                 </div>
                                 <div className="hft-lf-field">
                                     <label>PASSWORD</label>
