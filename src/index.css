@@ -1126,7 +1126,7 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
 @media (min-width: 860px) { .hbc-logo-sub { display: inline; } }
 
 .hbc-search {
-    display: flex; align-items: stretch; flex: 1; min-width: 180px;
+    display: flex; align-items: stretch; flex: 1; min-width: 0;
     background: rgba(6,182,212,0.05); border: 1px solid var(--border);
     overflow: hidden;
 }
@@ -1142,8 +1142,9 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
     flex: 1; background: transparent; border: none; outline: none;
     color: var(--text); font-size: 11px; padding: 6px 10px;
     font-family: var(--mono); min-width: 0; letter-spacing: 0.5px;
+    width: 0; /* allow shrinking past content */
 }
-.hbc-search-input::placeholder { color: var(--muted); }
+.hbc-search-input::placeholder { color: var(--muted); font-size: 10px; }
 .hbc-search-btn {
     background: var(--accent); color: #000; border: none;
     font-size: 10px; font-weight: 800; padding: 6px 14px;
@@ -1152,12 +1153,18 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
 }
 .hbc-search-btn:hover { background: #0e7490; color: #fff; }
 
-.hbc-quick { display: flex; gap: 4px; flex-wrap: wrap; }
+/* Quick symbol buttons — wrap on desktop, scroll on mobile */
+.hbc-quick {
+    display: flex; gap: 4px;
+    flex-wrap: wrap;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.hbc-quick::-webkit-scrollbar { display: none; }
 .hbc-quick-btn {
     font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 4px 9px;
     background: rgba(6,182,212,0.05); border: 1px solid var(--border2);
     color: var(--muted); cursor: pointer; transition: all 0.12s;
-    font-family: var(--mono);
+    font-family: var(--mono); white-space: nowrap; flex-shrink: 0;
 }
 .hbc-quick-btn:hover { background: rgba(6,182,212,0.14); border-color: var(--accent); color: var(--accent); }
 
@@ -1490,8 +1497,13 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
 @media (max-width: 600px) {
     .home-view.hb-home { padding: 0; }
     .hb-cmd-bar { gap: 6px; padding: 6px 10px; flex-wrap: wrap; }
-    .hbc-quick  { display: none; }
+    /* Search fills full width on mobile */
+    .hbc-search { order: 2; width: 100%; flex: 1 1 100%; }
+    .hbc-logo   { order: 1; }
     .hbc-status-grp { display: none; }
+    /* Quick buttons: show as horizontal scroll row instead of hiding */
+    .hbc-quick  { order: 3; width: 100%; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+    .hbc-search-label { display: none; } /* hide "SYMBOL>" prefix on mobile to save space */
     .hbm-gti    { display: none; }
     .hb-stats-row { grid-template-columns: repeat(5,1fr); }
     .hbs-val { font-size: 13px; }

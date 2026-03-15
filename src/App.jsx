@@ -364,6 +364,19 @@ export default function App() {
     const [alertsOpen, setAlertsOpen] = useState(false);
     const [alertForm, setAlertForm] = useState({ symbol: '', price: '', direction: 'ABOVE' });
     const [firedAlerts, setFiredAlerts] = useState([]);
+    const alertsRef = useRef(null);
+
+    // Close alerts panel when clicking outside
+    useEffect(() => {
+        if (!alertsOpen) return;
+        const handler = (e) => {
+            if (alertsRef.current && !alertsRef.current.contains(e.target)) {
+                setAlertsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [alertsOpen]);
 
     // Price flash
     const prevPricesRef = useRef({});
@@ -687,7 +700,7 @@ export default function App() {
                         <button type="submit" className="gh-search-btn" aria-label="Search">→</button>
                     </form>
                     )}
-                    <div className="gh-alerts-btn" onClick={() => setAlertsOpen(o => !o)}>
+                    <div className="gh-alerts-btn" ref={alertsRef} onClick={() => setAlertsOpen(o => !o)}>
                         🔔{firedAlerts.length > 0 && <span className="alert-badge">{firedAlerts.length}</span>}
                         {alertsOpen && (
                             <div className="alerts-panel" onClick={e => e.stopPropagation()}>
