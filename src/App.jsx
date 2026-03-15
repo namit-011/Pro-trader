@@ -341,6 +341,27 @@ export default function App() {
     // Clock
     const [clock, setClock] = useState('');
 
+    // HFT Model
+    const [hftData, setHftData] = useState(null);
+    const [hftTicker, setHftTicker] = useState('RELIANCE.NS');
+    const [hftLoading, setHftLoading] = useState(false);
+    const [trades, setTrades] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('hft_trades') || '[]'); } catch { return []; }
+    });
+    const [tradeForm, setTradeForm] = useState({ symbol: '', direction: 'LONG', entry: '', exit: '', qty: '', time: '', notes: '' });
+    const [hftTab, setHftTab] = useState('dashboard');
+
+    // Alerts
+    const [alerts, setAlerts] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('tx_alerts') || '[]'); } catch { return []; }
+    });
+    const [alertsOpen, setAlertsOpen] = useState(false);
+    const [alertForm, setAlertForm] = useState({ symbol: '', price: '', direction: 'ABOVE' });
+    const [firedAlerts, setFiredAlerts] = useState([]);
+
+    // Price flash
+    const prevPricesRef = useRef({});
+
     const chartRef = useRef(null);
     const chartContainerRef = useRef(null);
 
@@ -467,6 +488,32 @@ export default function App() {
         } catch { setCountryModal({ iso, name, data: [] }); }
     }, []);
 
+    const fetchHFT = useCallback(async (sym) => {
+        setHftLoading(true);
+        try {
+            const r = await fetch(`${API}/hft/${encodeURIComponent(sym)}`).then(x => x.json());
+            setHftData(r);
+        } catch {} finally { setHftLoading(false); }
+    }, []);
+
+    // Check price alerts against live data
+    useEffect(() => {
+        const check = () => {
+            const allPrices = {};
+            indicesBar.forEach(idx => { if (NSE_YAHOO[idx.name]) allPrices[NSE_YAHOO[idx.name]] = idx.price; });
+            liveTape.forEach(s => { allPrices[s.symbol] = s.price; });
+            const triggered = alerts.filter(a => {
+                const p = allPrices[a.symbol];
+                if (!p) return false;
+                return a.direction === 'ABOVE' ? p >= parseFloat(a.price) : p <= parseFloat(a.price);
+            });
+            if (triggered.length > 0) {
+                setFiredAlerts(prev => [...new Set([...prev, ...triggered.map(a => a.id)])]);
+            }
+        };
+        check();
+    }, [indicesBar, liveTape, alerts]);
+
     // Mount & auto-refresh
     useEffect(() => {
         fetchGTI(); fetchSignals(); fetchGlobal(); fetchFutures();
@@ -483,7 +530,7 @@ export default function App() {
         return () => { [t1,t2,t3,t4,t5,t6,t7,t8].forEach(clearInterval); };
     }, []);
 
-    // Keyboard shortcuts: F1=home F2=geopulse F3=terminal F4=signals
+    // Keyboard shortcuts: F1=home F2=geopulse F3=terminal F4=signals F5=hftmodel
     useEffect(() => {
         const handler = (e) => {
             if (e.target.tagName === 'INPUT') return;
@@ -491,6 +538,7 @@ export default function App() {
             if (e.key === 'F2') { e.preventDefault(); setActiveView('geopulse'); }
             if (e.key === 'F3') { e.preventDefault(); setActiveView('terminal'); }
             if (e.key === 'F4') { e.preventDefault(); setActiveView('signals'); }
+            if (e.key === 'F5') { e.preventDefault(); setActiveView('hftmodel'); }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
@@ -613,7 +661,7 @@ export default function App() {
                 </div>
 
                 <nav className="gh-nav">
-                    {[['geopulse', '⊕ EARTH PULSE'], ['terminal', '⊞ TERMINAL'], ['signals', '⊿ AI SIGNALS']].map(([v, l]) => (
+                    {[['geopulse', '⊕ EARTH PULSE'], ['terminal', '⊞ TERMINAL'], ['signals', '⊿ AI SIGNALS'], ['hftmodel', '◈ HFT MODEL']].map(([v, l]) => (
                         <button key={v} className={`gh-nav-btn${activeView === v ? ' active' : ''}`} onClick={() => setActiveView(v)}>{l}</button>
                     ))}
                 </nav>
@@ -623,6 +671,42 @@ export default function App() {
                         <input value={search} onChange={e => setSearch(e.target.value.toUpperCase())} placeholder="RELIANCE · AAPL · ^NSEI · GC=F" />
                         <button type="submit">→</button>
                     </form>
+                    <div className="gh-alerts-btn" onClick={() => setAlertsOpen(o => !o)}>
+                        🔔{firedAlerts.length > 0 && <span className="alert-badge">{firedAlerts.length}</span>}
+                        {alertsOpen && (
+                            <div className="alerts-panel" onClick={e => e.stopPropagation()}>
+                                <div className="ap-hdr">PRICE ALERTS</div>
+                                <div className="ap-form">
+                                    <input placeholder="Symbol (e.g. RELIANCE.NS)" value={alertForm.symbol} onChange={e => setAlertForm(f => ({...f, symbol: e.target.value.toUpperCase()}))} />
+                                    <input type="number" placeholder="Price" value={alertForm.price} onChange={e => setAlertForm(f => ({...f, price: e.target.value}))} />
+                                    <select value={alertForm.direction} onChange={e => setAlertForm(f => ({...f, direction: e.target.value}))}>
+                                        <option>ABOVE</option><option>BELOW</option>
+                                    </select>
+                                    <button onClick={() => {
+                                        if (!alertForm.symbol || !alertForm.price) return;
+                                        const a = { ...alertForm, id: Date.now() };
+                                        const updated = [...alerts, a];
+                                        setAlerts(updated);
+                                        localStorage.setItem('tx_alerts', JSON.stringify(updated));
+                                        setAlertForm({ symbol: '', price: '', direction: 'ABOVE' });
+                                    }}>+ SET</button>
+                                </div>
+                                {alerts.length === 0 && <div className="ap-empty">No alerts set</div>}
+                                {alerts.map(a => (
+                                    <div key={a.id} className={`ap-alert${firedAlerts.includes(a.id) ? ' ap-fired' : ''}`}>
+                                        <span>{a.symbol}</span>
+                                        <span>{a.direction} ₹{a.price}</span>
+                                        {firedAlerts.includes(a.id) && <span className="ap-triggered">🔥 TRIGGERED</span>}
+                                        <span className="ap-del" onClick={() => {
+                                            const updated = alerts.filter(x => x.id !== a.id);
+                                            setAlerts(updated);
+                                            localStorage.setItem('tx_alerts', JSON.stringify(updated));
+                                        }}>✕</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <div className="gh-live-badge"><span className="gh-dot" />LIVE · {signals.length} feeds</div>
                     <div className="gh-clock">⏱ {clock}</div>
                 </div>
@@ -650,8 +734,12 @@ export default function App() {
                 {indicesBar.slice(0, 10).map((idx, i) => {
                     const sym = NSE_YAHOO[idx.name];
                     const chg = idx.changePercent ?? 0;
+                    const prevPrice = prevPricesRef.current[idx.name];
+                    const flashing = prevPrice !== undefined && prevPrice !== idx.price;
+                    const flashDir = flashing ? (idx.price > prevPrice ? ' flash-up' : ' flash-down') : '';
+                    if (idx.price) prevPricesRef.current[idx.name] = idx.price;
                     return (
-                        <div key={i} className={`nis-chip${sym ? ' nis-clickable' : ''}`}
+                        <div key={i} className={`nis-chip${sym ? ' nis-clickable' : ''}${flashDir}`}
                             onClick={sym ? () => handleSelect(sym) : undefined}
                             title={sym ? `Click to analyze ${idx.name}` : idx.name}>
                             <span className="nis-name">{nseShortName(idx.name)}</span>
@@ -1759,6 +1847,404 @@ export default function App() {
                     </div>
                 )}
 
+                {/* ════ HFT MODEL VIEW ════ */}
+                {activeView === 'hftmodel' && (() => {
+                    const closedTrades = trades.filter(t => t.exit && t.exit !== '');
+                    const pnlList = closedTrades.map(t => {
+                        const mult = t.direction === 'LONG' ? 1 : -1;
+                        return mult * (parseFloat(t.exit) - parseFloat(t.entry)) * (parseFloat(t.qty) || 1);
+                    });
+                    const totalPnl = pnlList.reduce((a, b) => a + b, 0);
+                    const wins = pnlList.filter(p => p > 0).length;
+                    const losses = pnlList.filter(p => p < 0).length;
+                    const winRate = closedTrades.length > 0 ? ((wins / closedTrades.length) * 100).toFixed(1) : '—';
+                    const avgWin = wins > 0 ? (pnlList.filter(p => p > 0).reduce((a,b)=>a+b,0) / wins).toFixed(2) : '—';
+                    const avgLoss = losses > 0 ? Math.abs(pnlList.filter(p => p < 0).reduce((a,b)=>a+b,0) / losses).toFixed(2) : '—';
+                    const rr = avgWin !== '—' && avgLoss !== '—' ? (avgWin / avgLoss).toFixed(2) : '—';
+                    const maxDD = pnlList.length > 0 ? Math.abs(Math.min(...pnlList)).toFixed(2) : '—';
+                    const profitFactor = losses > 0 && wins > 0
+                        ? (pnlList.filter(p=>p>0).reduce((a,b)=>a+b,0) / Math.abs(pnlList.filter(p=>p<0).reduce((a,b)=>a+b,0))).toFixed(2)
+                        : '—';
+
+                    const timePatterns = {};
+                    closedTrades.forEach((t, i) => {
+                        if (!t.time) return;
+                        const hour = t.time.slice(0, 2) + ':00';
+                        if (!timePatterns[hour]) timePatterns[hour] = { wins: 0, losses: 0, pnl: 0 };
+                        if (pnlList[i] > 0) timePatterns[hour].wins++;
+                        else timePatterns[hour].losses++;
+                        timePatterns[hour].pnl += pnlList[i];
+                    });
+
+                    const addTrade = () => {
+                        if (!tradeForm.symbol || !tradeForm.entry) return;
+                        const newTrade = { ...tradeForm, id: Date.now(), date: new Date().toISOString().split('T')[0] };
+                        const updated = [newTrade, ...trades];
+                        setTrades(updated);
+                        localStorage.setItem('hft_trades', JSON.stringify(updated));
+                        setTradeForm({ symbol: '', direction: 'LONG', entry: '', exit: '', qty: '', time: '', notes: '' });
+                    };
+
+                    const deleteTrade = (id) => {
+                        const updated = trades.filter(t => t.id !== id);
+                        setTrades(updated);
+                        localStorage.setItem('hft_trades', JSON.stringify(updated));
+                    };
+
+                    return (
+                        <div className="hftmodel-view">
+                            {/* Header */}
+                            <div className="hft-header">
+                                <div className="hft-title">
+                                    <span className="hft-icon">◈</span>
+                                    <div>
+                                        <div className="hft-title-main">HFT MODEL <span className="hft-private-badge">PRIVATE</span></div>
+                                        <div className="hft-title-sub">Intraday High-Frequency Trading Analytics · Your Personal Edge</div>
+                                    </div>
+                                </div>
+                                <div className="hft-live-signal">
+                                    <form onSubmit={e => { e.preventDefault(); fetchHFT(hftTicker); }}>
+                                        <span className="hft-sym-label">ANALYZE›</span>
+                                        <input value={hftTicker} onChange={e => setHftTicker(e.target.value.toUpperCase())} className="hft-sym-input" placeholder="RELIANCE.NS" />
+                                        <button type="submit" className="hft-sym-btn">SCAN</button>
+                                    </form>
+                                </div>
+                                <div className="hft-tabs">
+                                    {[['dashboard','⊞ DASHBOARD'],['signals','⊿ SIGNALS'],['journal','✎ JOURNAL'],['patterns','◉ PATTERNS']].map(([tab,label]) => (
+                                        <button key={tab} className={`hft-tab-btn${hftTab === tab ? ' active' : ''}`} onClick={() => { setHftTab(tab); if (tab === 'signals') fetchHFT(hftTicker); }}>{label}</button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* DASHBOARD TAB */}
+                            {hftTab === 'dashboard' && (
+                                <div className="hft-dashboard">
+                                    <div className="hft-kpi-row">
+                                        {[
+                                            { val: closedTrades.length, lbl: 'TOTAL TRADES', color: 'var(--accent)' },
+                                            { val: `${winRate}%`, lbl: 'WIN RATE', color: parseFloat(winRate) >= 55 ? 'var(--pos)' : parseFloat(winRate) >= 45 ? 'var(--warn)' : 'var(--neg)' },
+                                            { val: `₹${totalPnl.toFixed(0)}`, lbl: 'TOTAL P&L', color: totalPnl >= 0 ? 'var(--pos)' : 'var(--neg)' },
+                                            { val: rr !== '—' ? `${rr}:1` : '—', lbl: 'RISK:REWARD', color: parseFloat(rr) >= 1.5 ? 'var(--pos)' : 'var(--warn)' },
+                                            { val: profitFactor !== '—' ? profitFactor : '—', lbl: 'PROFIT FACTOR', color: parseFloat(profitFactor) >= 1.5 ? 'var(--pos)' : 'var(--neg)' },
+                                            { val: `₹${avgWin}`, lbl: 'AVG WIN', color: 'var(--pos)' },
+                                            { val: `₹${avgLoss}`, lbl: 'AVG LOSS', color: 'var(--neg)' },
+                                            { val: `₹${maxDD}`, lbl: 'MAX LOSS', color: 'var(--neg)' },
+                                        ].map(k => (
+                                            <div key={k.lbl} className="hft-kpi">
+                                                <div className="hft-kpi-val" style={{ color: k.color }}>{k.val || '—'}</div>
+                                                <div className="hft-kpi-lbl">{k.lbl}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {pnlList.length > 1 && (() => {
+                                        let cum = 0;
+                                        const curve = pnlList.map(p => { cum += p; return +cum.toFixed(2); });
+                                        const W = 600, H = 80;
+                                        const mn = Math.min(0, ...curve) - 10, mx = Math.max(...curve) + 10;
+                                        const pts = curve.map((v, i) => `${(i / (curve.length-1)) * W},${H - ((v-mn)/(mx-mn)) * H}`).join(' ');
+                                        const isPos = curve[curve.length-1] >= 0;
+                                        return (
+                                            <div className="hft-curve-card">
+                                                <div className="hft-curve-label">EQUITY CURVE · {pnlList.length} TRADES</div>
+                                                <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="hft-curve-svg">
+                                                    <defs>
+                                                        <linearGradient id="curveGrad" x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="0%" stopColor={isPos ? '#10b981' : '#ef4444'} stopOpacity="0.3" />
+                                                            <stop offset="100%" stopColor={isPos ? '#10b981' : '#ef4444'} stopOpacity="0" />
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <polyline points={pts} fill="none" stroke={isPos ? '#10b981' : '#ef4444'} strokeWidth="2" />
+                                                    <line x1="0" y1={H - ((0-mn)/(mx-mn))*H} x2={W} y2={H - ((0-mn)/(mx-mn))*H} stroke="rgba(255,255,255,0.1)" strokeDasharray="4,4" />
+                                                </svg>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    <div className="hft-recent">
+                                        <div className="hft-section-hdr">RECENT TRADES</div>
+                                        {closedTrades.length === 0
+                                            ? <div className="geo-empty">No closed trades yet. Add trades in the Journal tab.</div>
+                                            : closedTrades.slice(0, 10).map((t, i) => (
+                                                <div key={t.id} className={`hft-trade-row ${pnlList[i] >= 0 ? 'tr-win' : 'tr-loss'}`}>
+                                                    <span className="htr-date">{t.date}</span>
+                                                    <span className="htr-sym">{t.symbol}</span>
+                                                    <span className={`htr-dir ${t.direction === 'LONG' ? 'pos' : 'neg'}`}>{t.direction}</span>
+                                                    <span className="htr-entry">E: ₹{t.entry}</span>
+                                                    <span className="htr-exit">X: ₹{t.exit || '—'}</span>
+                                                    <span className="htr-qty">Q: {t.qty || 1}</span>
+                                                    <span className={`htr-pnl ${pnlList[i] >= 0 ? 'pos' : 'neg'}`}>
+                                                        {pnlList[i] >= 0 ? '+' : ''}₹{pnlList[i]?.toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            ))
+                                        }
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* SIGNALS TAB */}
+                            {hftTab === 'signals' && (
+                                <div className="hft-signals-view">
+                                    {hftLoading ? <div className="geo-loading">⟳ Scanning {hftTicker}…</div>
+                                    : hftData && !hftData.error ? (
+                                        <>
+                                            <div className="hft-sig-hero">
+                                                <div className="hft-sig-badge" style={{ borderColor: actionColor(hftData.signal), color: actionColor(hftData.signal), background: actionColor(hftData.signal) + '18' }}>
+                                                    {hftData.signal}
+                                                </div>
+                                                <div className="hft-sig-meta">
+                                                    <span>{hftData.sym}</span>
+                                                    <span className="hft-regime" style={{ color: hftData.regimes === 'HIGH_VOL' ? 'var(--neg)' : hftData.regimes === 'LOW_VOL' ? 'var(--pos)' : 'var(--warn)' }}>
+                                                        {hftData.regimes} REGIME
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div className="hft-sig-grid">
+                                                {/* VWAP Bands */}
+                                                <div className="hft-sig-panel">
+                                                    <div className="hft-sp-hdr">VWAP ANALYSIS</div>
+                                                    {[
+                                                        ['VWAP +2σ', hftData.vwapUpper2, 'neg'],
+                                                        ['VWAP +1σ', hftData.vwapUpper1, 'neg'],
+                                                        ['VWAP', hftData.vwap, ''],
+                                                        ['Price', hftData.price, hftData.price >= hftData.vwap ? 'pos' : 'neg'],
+                                                        ['VWAP -1σ', hftData.vwapLower1, 'pos'],
+                                                        ['VWAP -2σ', hftData.vwapLower2, 'pos'],
+                                                    ].map(([l, v, c]) => v != null && (
+                                                        <div key={l} className={`hft-sp-row${l === 'Price' ? ' hft-price-row' : ''}`}>
+                                                            <span>{l}</span>
+                                                            <strong className={c}>₹{v?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                                                        </div>
+                                                    ))}
+                                                    <div className="hft-sp-signal">
+                                                        {hftData.vwap && hftData.price > hftData.vwap
+                                                            ? <span className="pos">▲ Price ABOVE VWAP — Bullish Bias</span>
+                                                            : <span className="neg">▼ Price BELOW VWAP — Bearish Bias</span>}
+                                                    </div>
+                                                </div>
+
+                                                {/* CVD */}
+                                                <div className="hft-sig-panel">
+                                                    <div className="hft-sp-hdr">CUMULATIVE VOL DELTA</div>
+                                                    <div className="hft-cvd-val" style={{ color: hftData.cvdTrend === 'BUYING' ? 'var(--pos)' : 'var(--neg)' }}>
+                                                        {hftData.cvdTrend === 'BUYING' ? '▲' : '▼'} {hftData.cvdTrend}
+                                                    </div>
+                                                    <div className="hft-sp-row"><span>CVD Value</span><strong style={{ color: hftData.cvdCurrent > 0 ? 'var(--pos)' : 'var(--neg)' }}>{hftData.cvdCurrent?.toLocaleString()}</strong></div>
+                                                    <div className="hft-sp-desc">
+                                                        {hftData.cvdTrend === 'BUYING'
+                                                            ? 'Net buy pressure. Institutions accumulating.'
+                                                            : 'Net sell pressure. Institutions distributing.'}
+                                                    </div>
+                                                    {hftData.cvdArr?.length > 1 && (() => {
+                                                        const arr = hftData.cvdArr;
+                                                        const mn = Math.min(...arr), mx = Math.max(...arr);
+                                                        const W2 = 200, H2 = 40;
+                                                        const pts = arr.map((v, i) => `${(i/(arr.length-1))*W2},${H2 - ((v-mn)/(mx-mn||1))*H2}`).join(' ');
+                                                        const isPos2 = arr[arr.length-1] > arr[0];
+                                                        return (
+                                                            <svg width="100%" height={H2} viewBox={`0 0 ${W2} ${H2}`} preserveAspectRatio="none">
+                                                                <polyline points={pts} fill="none" stroke={isPos2 ? '#10b981' : '#ef4444'} strokeWidth="1.5" />
+                                                            </svg>
+                                                        );
+                                                    })()}
+                                                </div>
+
+                                                {/* StochRSI */}
+                                                <div className="hft-sig-panel">
+                                                    <div className="hft-sp-hdr">STOCHASTIC RSI</div>
+                                                    {hftData.stochRsi ? (
+                                                        <>
+                                                            <div className="hft-sp-row">
+                                                                <span>%K (Fast)</span>
+                                                                <strong style={{ color: hftData.stochRsi.k < 20 ? 'var(--pos)' : hftData.stochRsi.k > 80 ? 'var(--neg)' : 'var(--warn)' }}>
+                                                                    {hftData.stochRsi.k}
+                                                                </strong>
+                                                            </div>
+                                                            <div className="hft-sp-row">
+                                                                <span>%D (Signal)</span>
+                                                                <strong>{hftData.stochRsi.d}</strong>
+                                                            </div>
+                                                            <div className="hft-sp-signal">
+                                                                {hftData.stochRsi.k < 20 ? <span className="pos">OVERSOLD — Potential long entry</span>
+                                                                : hftData.stochRsi.k > 80 ? <span className="neg">OVERBOUGHT — Potential short</span>
+                                                                : <span className="warn">NEUTRAL ZONE</span>}
+                                                            </div>
+                                                        </>
+                                                    ) : <div className="geo-empty" style={{fontSize:'11px'}}>Insufficient data</div>}
+                                                </div>
+
+                                                {/* Z-Score + ATR */}
+                                                <div className="hft-sig-panel">
+                                                    <div className="hft-sp-hdr">MEAN REVERSION + ATR</div>
+                                                    <div className="hft-sp-row"><span>Z-Score (20)</span>
+                                                        <strong style={{ color: Math.abs(hftData.zScore) > 2 ? (hftData.zScore < 0 ? 'var(--pos)' : 'var(--neg)') : 'var(--warn)' }}>
+                                                            {hftData.zScore}σ
+                                                        </strong>
+                                                    </div>
+                                                    <div className="hft-sp-row"><span>ATR (14)</span><strong>{hftData.atr}</strong></div>
+                                                    <div className="hft-sp-row"><span>ATR %</span><strong style={{ color: hftData.atrPct > 2 ? 'var(--neg)' : 'var(--pos)' }}>{hftData.atrPct}%</strong></div>
+                                                    <div className="hft-sp-row"><span>Point of Control</span><strong className="warn">₹{hftData.pointOfControl?.toLocaleString('en-IN')}</strong></div>
+                                                    <div className="hft-sp-signal">
+                                                        {hftData.zScore < -2 ? <span className="pos">OVERSOLD — Z {hftData.zScore}σ below mean</span>
+                                                        : hftData.zScore > 2 ? <span className="neg">OVERBOUGHT — Z {hftData.zScore}σ above mean</span>
+                                                        : <span className="warn">FAIR VALUE ZONE</span>}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="hft-setup-card">
+                                                <div className="hft-setup-hdr">◈ SUGGESTED TRADE SETUP</div>
+                                                <div className="hft-setup-body">
+                                                    <div className="hft-setup-sig" style={{ color: actionColor(hftData.signal) }}>{hftData.signal}</div>
+                                                    {hftData.vwap && (
+                                                        <div className="hft-setup-levels">
+                                                            <div><span>ENTRY ZONE</span><strong>{hftData.signal?.includes('BUY') ? `₹${hftData.vwapLower1?.toLocaleString('en-IN') || hftData.vwap?.toLocaleString('en-IN')}` : `₹${hftData.vwapUpper1?.toLocaleString('en-IN') || hftData.vwap?.toLocaleString('en-IN')}`}</strong></div>
+                                                            <div><span>TARGET 1</span><strong className="pos">{hftData.signal?.includes('BUY') ? `₹${hftData.vwap?.toLocaleString('en-IN')}` : `₹${hftData.vwapLower1?.toLocaleString('en-IN')}`}</strong></div>
+                                                            <div><span>TARGET 2</span><strong className="pos">{hftData.signal?.includes('BUY') ? `₹${hftData.vwapUpper1?.toLocaleString('en-IN')}` : `₹${hftData.vwapLower2?.toLocaleString('en-IN')}`}</strong></div>
+                                                            <div><span>STOP LOSS</span><strong className="neg">{hftData.atr ? `ATR-based: ±${hftData.atr}` : 'Use ATR stop'}</strong></div>
+                                                            <div><span>ATR STOP</span><strong className="neg">₹{hftData.atr && hftData.price ? (hftData.signal?.includes('BUY') ? hftData.price - hftData.atr : hftData.price + hftData.atr)?.toLocaleString('en-IN', {maximumFractionDigits:2}) : '—'}</strong></div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="hft-sig-empty">
+                                            <div className="hft-sig-empty-icon">⊿</div>
+                                            <div>Enter a symbol above and click SCAN to run HFT signal analysis</div>
+                                            <div className="hft-sig-empty-sub">Uses StochRSI · VWAP Bands · CVD · Z-Score · ATR · Volume Profile</div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* JOURNAL TAB */}
+                            {hftTab === 'journal' && (
+                                <div className="hft-journal">
+                                    <div className="hft-add-form">
+                                        <div className="hft-form-hdr">✎ LOG TRADE</div>
+                                        <div className="hft-form-grid">
+                                            <div className="hft-form-field">
+                                                <label>SYMBOL</label>
+                                                <input value={tradeForm.symbol} onChange={e => setTradeForm(f => ({...f, symbol: e.target.value.toUpperCase()}))} placeholder="RELIANCE.NS" />
+                                            </div>
+                                            <div className="hft-form-field">
+                                                <label>DIRECTION</label>
+                                                <select value={tradeForm.direction} onChange={e => setTradeForm(f => ({...f, direction: e.target.value}))}>
+                                                    <option>LONG</option><option>SHORT</option>
+                                                </select>
+                                            </div>
+                                            <div className="hft-form-field">
+                                                <label>ENTRY ₹</label>
+                                                <input type="number" value={tradeForm.entry} onChange={e => setTradeForm(f => ({...f, entry: e.target.value}))} placeholder="0.00" />
+                                            </div>
+                                            <div className="hft-form-field">
+                                                <label>EXIT ₹</label>
+                                                <input type="number" value={tradeForm.exit} onChange={e => setTradeForm(f => ({...f, exit: e.target.value}))} placeholder="0.00" />
+                                            </div>
+                                            <div className="hft-form-field">
+                                                <label>QTY / LOTS</label>
+                                                <input type="number" value={tradeForm.qty} onChange={e => setTradeForm(f => ({...f, qty: e.target.value}))} placeholder="1" />
+                                            </div>
+                                            <div className="hft-form-field">
+                                                <label>TIME (HH:MM)</label>
+                                                <input value={tradeForm.time} onChange={e => setTradeForm(f => ({...f, time: e.target.value}))} placeholder="09:30" />
+                                            </div>
+                                            <div className="hft-form-field hft-notes-field">
+                                                <label>NOTES / SETUP</label>
+                                                <input value={tradeForm.notes} onChange={e => setTradeForm(f => ({...f, notes: e.target.value}))} placeholder="VWAP reclaim, news catalyst, breakout..." />
+                                            </div>
+                                            <button className="hft-add-btn" onClick={addTrade}>+ ADD TRADE</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="hft-journal-list">
+                                        <div className="hft-journal-hdr">
+                                            <span>DATE</span><span>SYM</span><span>DIR</span><span>ENTRY</span><span>EXIT</span><span>QTY</span><span>P&L</span><span>NOTES</span><span></span>
+                                        </div>
+                                        {trades.length === 0
+                                            ? <div className="geo-empty">No trades logged yet</div>
+                                            : trades.map((t) => {
+                                                const pnl = t.exit ? ((t.direction === 'LONG' ? 1 : -1) * (parseFloat(t.exit) - parseFloat(t.entry)) * (parseFloat(t.qty)||1)) : null;
+                                                return (
+                                                    <div key={t.id} className={`hft-j-row ${pnl != null ? (pnl >= 0 ? 'jrow-win' : 'jrow-loss') : ''}`}>
+                                                        <span>{t.date}</span>
+                                                        <span className="hft-j-sym" onClick={() => { setHftTicker(t.symbol); setHftTab('signals'); fetchHFT(t.symbol); }}>{t.symbol}</span>
+                                                        <span className={t.direction === 'LONG' ? 'pos' : 'neg'}>{t.direction}</span>
+                                                        <span>₹{t.entry}</span>
+                                                        <span>{t.exit ? `₹${t.exit}` : <em>open</em>}</span>
+                                                        <span>{t.qty || 1}</span>
+                                                        <span className={pnl != null ? (pnl >= 0 ? 'pos' : 'neg') : ''}>
+                                                            {pnl != null ? `${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(2)}` : '—'}
+                                                        </span>
+                                                        <span className="hft-j-notes">{t.notes}</span>
+                                                        <span className="hft-j-del" onClick={() => deleteTrade(t.id)}>✕</span>
+                                                    </div>
+                                                );
+                                            })
+                                        }
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* PATTERNS TAB */}
+                            {hftTab === 'patterns' && (
+                                <div className="hft-patterns">
+                                    <div className="hft-section-hdr">TIME-OF-DAY PERFORMANCE</div>
+                                    {Object.keys(timePatterns).length === 0
+                                        ? <div className="geo-empty">Add trades with times to see patterns</div>
+                                        : (
+                                            <div className="hft-time-grid">
+                                                {Object.entries(timePatterns).sort().map(([hour, data]) => {
+                                                    const total = data.wins + data.losses;
+                                                    const wr = total > 0 ? ((data.wins/total)*100).toFixed(0) : 0;
+                                                    return (
+                                                        <div key={hour} className="hft-time-cell" style={{ borderColor: data.pnl >= 0 ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)', background: data.pnl >= 0 ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)' }}>
+                                                            <div className="htc-hour">{hour}</div>
+                                                            <div className="htc-wr" style={{ color: parseFloat(wr) >= 60 ? 'var(--pos)' : parseFloat(wr) >= 45 ? 'var(--warn)' : 'var(--neg)' }}>{wr}% WR</div>
+                                                            <div className="htc-pnl" style={{ color: data.pnl >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{data.pnl >= 0 ? '+' : ''}₹{data.pnl.toFixed(0)}</div>
+                                                            <div className="htc-trades">{data.wins}W {data.losses}L</div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )
+                                    }
+                                    <div className="hft-section-hdr" style={{ marginTop: 20 }}>SETUP ANALYSIS</div>
+                                    {(() => {
+                                        const setupMap = {};
+                                        closedTrades.forEach((t, i) => {
+                                            if (!t.notes) return;
+                                            const setup = t.notes.split(',')[0].trim().toLowerCase();
+                                            if (!setupMap[setup]) setupMap[setup] = { wins: 0, losses: 0, pnl: 0 };
+                                            if (pnlList[i] > 0) setupMap[setup].wins++;
+                                            else setupMap[setup].losses++;
+                                            setupMap[setup].pnl += pnlList[i];
+                                        });
+                                        const setups = Object.entries(setupMap).sort((a,b) => b[1].pnl - a[1].pnl);
+                                        return setups.length === 0
+                                            ? <div className="geo-empty">Add trade notes to analyze setups</div>
+                                            : setups.map(([setup, data]) => {
+                                                const total = data.wins + data.losses;
+                                                return (
+                                                    <div key={setup} className="hft-setup-row">
+                                                        <span className="hsr-setup">{setup}</span>
+                                                        <span className="hsr-wr">{total > 0 ? ((data.wins/total)*100).toFixed(0) : 0}% WR</span>
+                                                        <span className="hsr-trades">{total} trades</span>
+                                                        <span className={`hsr-pnl ${data.pnl >= 0 ? 'pos' : 'neg'}`}>{data.pnl >= 0 ? '+' : ''}₹{data.pnl.toFixed(0)}</span>
+                                                        <div className="hsr-bar-wrap"><div className="hsr-bar" style={{ width: `${Math.min(100, Math.abs(data.pnl)/10)}%`, background: data.pnl >= 0 ? 'var(--pos)' : 'var(--neg)' }} /></div>
+                                                    </div>
+                                                );
+                                            });
+                                    })()}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
+
             </div>{/* /geo-main */}
 
             {/* ── BOTTOM BAR — Global Markets + Commodities ── */}
@@ -1817,6 +2303,7 @@ export default function App() {
                     { view: 'geopulse', icon: '⊕', label: 'Earth' },
                     { view: 'terminal', icon: '⊞', label: 'Terminal' },
                     { view: 'signals',  icon: '⊿', label: 'Signals' },
+                    { view: 'hftmodel', icon: '◈', label: 'HFT' },
                 ].map(({ view, icon, label }) => (
                     <button key={view} className={activeView === view ? 'active' : ''} onClick={() => setActiveView(view)}>
                         <span className="mn-icon">{icon}</span>

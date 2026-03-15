@@ -64,25 +64,41 @@ const dSec = (t) => {
     return f.length ? f : ['Broad Market'];
 };
 
-const BULLISH_W = ['surge', 'rally', 'soar', 'record', 'beat', 'bullish', 'growth', 'rise', 'gain', 'profit', 'outperform', 'upgrade', 'strong', 'boom', 'high', 'climbs', 'jumps'];
-const BEARISH_W = ['crash', 'plunge', 'tumble', 'crisis', 'recession', 'slump', 'fall', 'loss', 'decline', 'weak', 'bearish', 'downgrade', 'cut', 'drop', 'worry', 'concerns', 'panic', 'miss'];
+// ── Loughran-McDonald Financial Sentiment Lexicon ──
+const LM_STRONG_BEAR = ['bankruptcy','bankrupt','fraud','lawsuit','investigation','restatement','sec probe','ponzi','insolvency','criminal','subpoena','recall','breach','default','downgrade','cut','miss','slump','crash','collapse','tumble','plunge','selloff','warning','cut guidance','loss','charges','writedown','impairment','layoffs','job cuts','fired','resign','suspended','halted','delisted'];
+const LM_BEAR = ['below expectations','decline','fall','drop','weak','concern','headwinds','slowdown','miss','disappoints','reduces','lowers','cautious','uncertainty','volatile','pressure','challenging','loss','negative','downside','risk','warns','cuts','hurt','drag','weigh','miss estimates','below forecast'];
+const LM_STRONG_BULL = ['record revenue','blowout','beat expectations','raised guidance','fda approval','acquisition','buyback','dividend hike','strategic partnership','breakthrough','upgrade','strong buy','outperform','new high','all-time high','profit surge','revenue beat','eps beat','accelerating growth','new contract','major deal'];
+const LM_BULL = ['beat','growth','strong','rise','gain','profit','outperform','upgrade','expand','positive','beat estimates','above forecast','increased','higher','improve','optimistic','opportunity','recovery','momentum','bullish','upside','rally','surge','soar','climb'];
 
-const dSent = (t) => {
-    const low = t.toLowerCase();
-    const b = BULLISH_W.filter(w => low.includes(w)).length;
-    const n = BEARISH_W.filter(w => low.includes(w)).length;
-    if (b > n) return 'bullish';
-    if (n > b) return 'bearish';
+const dSent = (text) => {
+    const t = (text || '').toLowerCase();
+    let score = 0;
+    LM_STRONG_BEAR.forEach(w => { if (t.includes(w)) score -= 2; });
+    LM_BEAR.forEach(w => { if (t.includes(w)) score -= 1; });
+    LM_STRONG_BULL.forEach(w => { if (t.includes(w)) score += 2; });
+    LM_BULL.forEach(w => { if (t.includes(w)) score += 1; });
+    if (score >= 2) return 'bullish';
+    if (score <= -2) return 'bearish';
+    if (score === 1) return 'mildly_bullish';
+    if (score === -1) return 'mildly_bearish';
     return 'neutral';
 };
 
-// 0 = strong bearish, 50 = neutral, 100 = strong bullish
+const sentScore = (text) => {
+    const t = (text || '').toLowerCase();
+    let score = 0, total = 0;
+    LM_STRONG_BEAR.forEach(w => { if (t.includes(w)) { score -= 2; total += 2; } });
+    LM_BEAR.forEach(w => { if (t.includes(w)) { score -= 1; total += 1; } });
+    LM_STRONG_BULL.forEach(w => { if (t.includes(w)) { score += 2; total += 2; } });
+    LM_BULL.forEach(w => { if (t.includes(w)) { score += 1; total += 1; } });
+    const confidence = total > 0 ? Math.min(99, Math.round((Math.abs(score) / total) * 100)) : 0;
+    return { sentiment: dSent(text), score, confidence };
+};
+
+// Legacy score helper (0-100 scale, kept for backwards compat)
 const dSentScore = (t) => {
-    const low = t.toLowerCase();
-    let score = 50;
-    BULLISH_W.forEach(w => { if (low.includes(w)) score += 10; });
-    BEARISH_W.forEach(w => { if (low.includes(w)) score -= 10; });
-    return Math.max(0, Math.min(100, score));
+    const s = sentScore(t);
+    return Math.max(0, Math.min(100, 50 + s.score * 10));
 };
 
 const dIndiaImpact = (t) => {
@@ -377,18 +393,22 @@ const HIGH_IMPACT_WORDS = [
     'default', 'collapse', 'record high', 'all-time high', 'circuit', 'fii', 'tariff', 'oil price',
 ];
 
-const mapNewsItem = (title, link, publisher, timestamp) => ({
-    title, link, publisher,
-    timestamp,
-    time: getRelativeTime(new Date(timestamp)),
-    rawTime: new Date(timestamp).toLocaleString('en-IN'),
-    sectors: dSec(title),
-    sentiment: dSent(title),
-    sentimentScore: dSentScore(title),
-    indiaImpact: dIndiaImpact(title),
-    highImpact: HIGH_IMPACT_WORDS.some(w => title.toLowerCase().includes(w)),
-    confirmed: false,
-});
+const mapNewsItem = (title, link, publisher, timestamp) => {
+    const ss = sentScore(title);
+    return {
+        title, link, publisher,
+        timestamp,
+        time: getRelativeTime(new Date(timestamp)),
+        rawTime: new Date(timestamp).toLocaleString('en-IN'),
+        sectors: dSec(title),
+        sentiment: ss.sentiment,
+        sentimentScore: ss.score,
+        confidence: ss.confidence,
+        indiaImpact: dIndiaImpact(title),
+        highImpact: HIGH_IMPACT_WORDS.some(w => title.toLowerCase().includes(w)),
+        confirmed: false,
+    };
+};
 
 app.get('/api/globalnews', async (req, res) => {
     const now = Date.now();
@@ -664,7 +684,8 @@ app.get('/api/analyze/:ticker', async (req, res) => {
             })),
             news: searchRes.news.map(n => {
                 const pubDate = n.providerPublishTime instanceof Date ? n.providerPublishTime : new Date(n.providerPublishTime * 1000);
-                return { title: n.title, link: n.link, publisher: n.publisher, time: getRelativeTime(pubDate), sentiment: dSent(n.title), sectors: dSec(n.title) };
+                const ss = sentScore(n.title);
+                return { title: n.title, link: n.link, publisher: n.publisher, time: getRelativeTime(pubDate), sentiment: ss.sentiment, sentimentScore: ss.score, confidence: ss.confidence, sectors: dSec(n.title) };
             })
         });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1212,6 +1233,122 @@ app.get('/api/country/:iso', async (req, res) => {
         countryCache[iso] = { data, ts: Date.now() };
         res.json(data);
     } catch { res.json({ iso, tickers: [] }); }
+});
+
+// ── HFT Advanced Signals Endpoint ──
+app.get('/api/hft/:ticker', async (req, res) => {
+    try {
+        let sym = (req.params.ticker || '').toUpperCase().replace(/[^A-Z0-9\^\.=\-\_]/g, '');
+        if (!sym || sym.length > 20) return res.status(400).json({ error: 'Invalid ticker' });
+
+        const [quote, chart5m, chart1d] = await Promise.all([
+            yahooFinance.quote(sym).catch(() => ({})),
+            yahooFinance.chart(sym, { interval: '5m', period1: toPeriod1('5d') }).catch(() => ({ quotes: [] })),
+            yahooFinance.chart(sym, { interval: '1d', period1: toPeriod1('1mo') }).catch(() => ({ quotes: [] })),
+        ]);
+
+        const q5 = (chart5m?.quotes || []).filter(x => x && x.close != null);
+        const q1d = (chart1d?.quotes || []).filter(x => x && x.close != null);
+
+        if (q5.length < 10) return res.json({ error: 'Insufficient data', sym });
+
+        const cl = q5.map(x => x.close);
+        const hi = q5.map(x => x.high);
+        const lo = q5.map(x => x.low);
+        const vo = q5.map(x => x.volume || 0);
+        const price = quote.regularMarketPrice || cl[cl.length - 1];
+
+        // ATR (14-period)
+        const atrRaw = ADX.calculate({ high: hi, low: lo, close: cl, period: 14 });
+        const atr = atrRaw.length ? +atrRaw[atrRaw.length - 1].atr?.toFixed(2) : null;
+        const atrPct = atr && price ? +((atr / price) * 100).toFixed(2) : null;
+
+        // StochRSI
+        const rsiArr = RSI.calculate({ values: cl, period: 14 });
+        const stochRsiArr = rsiArr.length >= 14 ? Stochastic.calculate({ high: rsiArr, low: rsiArr, close: rsiArr, period: 14, signalPeriod: 3 }) : [];
+        const stochRsi = stochRsiArr.length ? { k: +stochRsiArr[stochRsiArr.length-1].k?.toFixed(2), d: +stochRsiArr[stochRsiArr.length-1].d?.toFixed(2) } : null;
+
+        // VWAP and standard deviation bands
+        let vwap = null, vwapUpper1 = null, vwapLower1 = null, vwapUpper2 = null, vwapLower2 = null;
+        if (vo.some(v => v > 0)) {
+            const tp = q5.map(x => (x.high + x.low + x.close) / 3);
+            const totalPV = tp.reduce((s, p, i) => s + p * vo[i], 0);
+            const totalV  = vo.reduce((a, b) => a + b, 0);
+            vwap = totalV > 0 ? +(totalPV / totalV).toFixed(2) : null;
+            if (vwap) {
+                const variances = tp.map((p, i) => vo[i] * Math.pow(p - vwap, 2));
+                const totalVar = variances.reduce((a, b) => a + b, 0);
+                const vwapStd = totalV > 0 ? Math.sqrt(totalVar / totalV) : 0;
+                vwapUpper1 = +(vwap + vwapStd).toFixed(2);
+                vwapLower1 = +(vwap - vwapStd).toFixed(2);
+                vwapUpper2 = +(vwap + 2 * vwapStd).toFixed(2);
+                vwapLower2 = +(vwap - 2 * vwapStd).toFixed(2);
+            }
+        }
+
+        // Cumulative Volume Delta (CVD) approximation
+        let cvd = 0;
+        const cvdArr = q5.map(x => {
+            const range = (x.high - x.low) || 1;
+            const buyVol = (x.volume || 0) * ((x.close - x.low) / range);
+            const sellVol = (x.volume || 0) - buyVol;
+            cvd += buyVol - sellVol;
+            return +cvd.toFixed(0);
+        });
+        const cvdCurrent = cvdArr[cvdArr.length - 1];
+        const cvdTrend = cvdArr.length >= 6
+            ? (cvdArr[cvdArr.length-1] > cvdArr[cvdArr.length-6] ? 'BUYING' : 'SELLING')
+            : 'NEUTRAL';
+
+        // Z-Score (20-period mean reversion)
+        const zPeriod = Math.min(20, cl.length);
+        const zSlice = cl.slice(-zPeriod);
+        const zMean = zSlice.reduce((a, b) => a + b, 0) / zPeriod;
+        const zStd  = Math.sqrt(zSlice.reduce((s, v) => s + Math.pow(v - zMean, 2), 0) / zPeriod);
+        const zScore = zStd > 0 ? +((price - zMean) / zStd).toFixed(2) : 0;
+
+        // Volume Profile (POC)
+        const volByPrice = {};
+        q5.forEach(x => {
+            const bucket = Math.round((x.high + x.low) / 2 / 50) * 50;
+            volByPrice[bucket] = (volByPrice[bucket] || 0) + (x.volume || 0);
+        });
+        const poc = Object.entries(volByPrice).sort((a, b) => b[1] - a[1])[0];
+        const pointOfControl = poc ? +poc[0] : null;
+
+        // Volume spike
+        const avgVol = vo.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(1, vo.length - 1);
+        const lastVol = vo[vo.length - 1];
+        const volSpikeRatio = avgVol > 0 ? +(lastVol / avgVol).toFixed(2) : null;
+
+        // Signal synthesis
+        let signal = 'NEUTRAL', signalStrength = 0;
+        if (stochRsi?.k < 20) signalStrength += 2;
+        if (stochRsi?.k > 80) signalStrength -= 2;
+        if (vwap && price > vwap) signalStrength += 1;
+        if (vwap && price < vwap) signalStrength -= 1;
+        if (cvdTrend === 'BUYING') signalStrength += 1;
+        if (cvdTrend === 'SELLING') signalStrength -= 1;
+        if (zScore < -2) signalStrength += 2; // oversold
+        if (zScore > 2) signalStrength -= 2;  // overbought
+        if (signalStrength >= 3) signal = 'STRONG BUY';
+        else if (signalStrength >= 1) signal = 'BUY';
+        else if (signalStrength <= -3) signal = 'STRONG SELL';
+        else if (signalStrength <= -1) signal = 'SELL';
+
+        res.json({
+            sym, price, signal, signalStrength,
+            atr, atrPct,
+            stochRsi,
+            vwap, vwapUpper1, vwapLower1, vwapUpper2, vwapLower2,
+            cvdCurrent: +cvdCurrent?.toFixed(0), cvdTrend,
+            cvdArr: cvdArr.slice(-50),
+            zScore,
+            pointOfControl,
+            volSpikeRatio,
+            regimes: atrPct ? (atrPct < 0.5 ? 'LOW_VOL' : atrPct < 1.5 ? 'NORMAL' : 'HIGH_VOL') : 'UNKNOWN',
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Serve React build in production
