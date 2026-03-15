@@ -1872,8 +1872,8 @@ export default function App() {
                             <div className="hft-login-sub">Restricted access · Authorized personnel only</div>
                             <form className="hft-login-form" onSubmit={e => {
                                 e.preventDefault();
-                                const emailOk = hftLoginForm.email.trim().toLowerCase() === '01nami01@gmail.com';
-                                const passOk  = hftLoginForm.password.trim() === 'HFT@2026';
+                                const emailOk = hftLoginForm.email.trim().toLowerCase().replace(/\s/g,'') === '01nami01@gmail.com';
+                                const passOk  = hftLoginForm.password.trim().replace(/\s/g,'') === 'HFT@2026';
                                 if (emailOk && passOk) {
                                     localStorage.setItem('hft_auth', 'true');
                                     setHftLoggedIn(true);
