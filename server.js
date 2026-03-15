@@ -1679,6 +1679,337 @@ app.get('/api/search', async (req, res) => {
     } catch { res.json([]); }
 });
 
+// ══════════════════════════════════════════════════════
+// ── NAMIT'S PERSONAL 2-LAYER F&O MODEL ──────────────
+// Edge profile derived from 3 years of trade data
+// (FY24: 1293 trades, FY25: 1191 trades, FY26: 637 trades)
+// ══════════════════════════════════════════════════════
+
+const TRADER_EDGE = {
+    totalTrades: 3121, overallWR: 41.5,
+    intradayWR: 43,    intradayPnl: 1233970,
+    overnightPnl: -463079, multidayPnl: -2671715,
+    // Monthly win-rate & PnL from actual data
+    monthly: [
+        { m: 'Jan', wr: 46,  pnl: -443929  },
+        { m: 'Feb', wr: 28,  pnl: -1597548 }, // WORST
+        { m: 'Mar', wr: 40,  pnl: -161287  },
+        { m: 'Apr', wr: 46,  pnl:   70660  },
+        { m: 'May', wr: 43,  pnl: -143714  },
+        { m: 'Jun', wr: 58,  pnl:   99250  },
+        { m: 'Jul', wr: 37,  pnl: -508254  }, // BAD
+        { m: 'Aug', wr: 33,  pnl: -380342  }, // BAD
+        { m: 'Sep', wr: 36,  pnl: -401322  }, // BAD
+        { m: 'Oct', wr: 36,  pnl: -140813  },
+        { m: 'Nov', wr: 49,  pnl:  605711  }, // GOOD
+        { m: 'Dec', wr: 51,  pnl: 1100763  }, // BEST
+    ],
+    // Best underlyings (≥60% WR, positive PnL)
+    edgeStocks: ['IRCTC','AMBUJACEM','NATIONALUM','ADANIPORTS','NMDC','BSOFT','ICICIBANK','TATAMOTORS','SAIL','COALINDIA','TITAN','ITC'],
+    avoidStocks: ['RELIANCE','SENSEX','BEL','JSWSTEEL','TATASTEEL','IDEA','SRF','PVRINOX','ASHOKLEY','BANKEX'],
+    // Premium sweet spots from data
+    premiumEdge: [
+        { range: '5–15',    wr: 31, pnl: 106169,  intradayPnl: 334518 },
+        { range: '15–30',   wr: 39, pnl: 603550,  intradayPnl: 154376 },
+        { range: '100–200', wr: 57, pnl: -1373555, intradayPnl: 198710 },
+        { range: '>200',    wr: 66, pnl: 219737,  intradayPnl: 419534 },
+    ],
+    intradayPremiumBest: { range: '>200', wr: 78, pnl: 419534 },
+    worstHabit: 'Averaging down: 626 positions, -₹5.3L total loss',
+};
+
+let personalModelCache = null, pmCacheTs = 0;
+
+app.get('/api/personal-model', async (_req, res) => {
+    if (personalModelCache && Date.now() - pmCacheTs < 3 * 60 * 1000) return res.json(personalModelCache);
+    try {
+        const now   = new Date();
+        const ist   = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        const month = ist.getMonth(); // 0-indexed
+        const day   = ist.getDay();   // 0=Sun
+        const hour  = ist.getHours();
+        const mins  = ist.getHours() * 60 + ist.getMinutes();
+        const isMarketHours = day >= 1 && day <= 5 && mins >= 555 && mins < 930; // 09:15-15:30 IST
+
+        // Fetch all live data in parallel
+        const [niftyQ, vixQ, bankQ, newsRes, niftyChart] = await Promise.all([
+            yahooFinance.quote('^NSEI').catch(() => null),
+            yahooFinance.quote('^INDIAVIX').catch(() => null),
+            yahooFinance.quote('^NSEBANK').catch(() => null),
+            fetch(`http://localhost:${process.env.PORT || 3000}/api/globalnews`).then(r => r.json()).catch(() => []),
+            yahooFinance.chart('^NSEI', { interval: '5m', period1: toPeriod1('5d') }).catch(() => null),
+        ]);
+
+        const niftyPrice   = niftyQ?.regularMarketPrice || 0;
+        const niftyChange  = niftyQ?.regularMarketChangePercent || 0;
+        const vix          = vixQ?.regularMarketPrice || 15;
+        const bankNifty    = bankQ?.regularMarketPrice || 0;
+        const bankChange   = bankQ?.regularMarketChangePercent || 0;
+
+        // ── LAYER 1: SENTIMENT ────────────────────────────────────────────────
+        // 1a. News sentiment (double-checked with Loughran-McDonald 4-tier)
+        const sentTexts = (Array.isArray(newsRes) ? newsRes : []).slice(0, 20).map(n => n.headline || n.title || '');
+        let sentScore = 0, strongBullCount = 0, strongBearCount = 0;
+        sentTexts.forEach(t => {
+            const s = sentScore; // use existing sentScore fn
+            const tl = t.toLowerCase();
+            let ts = 0;
+            LM_STRONG_BULL.forEach(w => { if (tl.includes(w)) { ts += 2; strongBullCount++; } });
+            LM_BULL.forEach(w => { if (tl.includes(w)) ts += 1; });
+            LM_STRONG_BEAR.forEach(w => { if (tl.includes(w)) { ts -= 2; strongBearCount++; } });
+            LM_BEAR.forEach(w => { if (tl.includes(w)) ts -= 1; });
+            sentScore += ts;
+        });
+        // Normalise sentiment to 0-25
+        const sentNorm = Math.max(0, Math.min(25, 12.5 + sentScore * 0.8));
+        const sentLabel = sentScore >= 4 ? 'STRONG BULL' : sentScore >= 1 ? 'BULL' :
+                         sentScore <= -4 ? 'STRONG BEAR' : sentScore <= -1 ? 'BEAR' : 'NEUTRAL';
+        // Second-check: if strong bear signals dominate, override
+        const sentDoubleCheck = strongBearCount > strongBullCount + 2 ? 'CONFIRMED_BEAR' :
+                                strongBullCount > strongBearCount + 2 ? 'CONFIRMED_BULL' : 'MIXED';
+
+        // 1b. VIX Score (lower VIX = better for buying options affordably)
+        let vixScore;
+        if (vix < 12)       { vixScore = 25; }
+        else if (vix < 15)  { vixScore = 22; }
+        else if (vix < 18)  { vixScore = 18; }
+        else if (vix < 22)  { vixScore = 12; }
+        else if (vix < 28)  { vixScore = 6;  }
+        else                { vixScore = 2;  }
+        const vixLabel = vix < 12 ? 'VERY LOW (Buy cheap options)' :
+                         vix < 15 ? 'LOW (Favourable)' :
+                         vix < 18 ? 'NORMAL' :
+                         vix < 22 ? 'ELEVATED (Expensive)' :
+                         vix < 28 ? 'HIGH (Avoid buying)' : 'EXTREME (AVOID)';
+
+        // 1c. Month filter (from Namit's actual monthly PnL data)
+        const mData = TRADER_EDGE.monthly[month];
+        let monthScore;
+        if (mData.pnl > 200000)       { monthScore = 25; }
+        else if (mData.pnl > 0)       { monthScore = 20; }
+        else if (mData.pnl > -200000) { monthScore = 14; }
+        else                          { monthScore = 4;  }
+        const monthLabel = mData.pnl > 200000 ? `${mData.m} — YOUR BEST (${mData.wr}% WR hist.)` :
+                           mData.pnl > 0      ? `${mData.m} — OK (${mData.wr}% WR hist.)` :
+                           mData.pnl > -200000? `${mData.m} — WEAK (${mData.wr}% WR hist.)` :
+                                                `${mData.m} — AVOID (${mData.wr}% WR hist. | WORST PERIOD)`;
+
+        // 1d. Market trend (NIFTY direction + breadth proxy)
+        let trendScore;
+        if (niftyChange > 1)         { trendScore = 25; }
+        else if (niftyChange > 0.3)  { trendScore = 20; }
+        else if (niftyChange > 0)    { trendScore = 14; }
+        else if (niftyChange > -0.5) { trendScore = 8;  }
+        else                         { trendScore = 2;  }
+        const trendLabel = niftyChange > 1 ? `Strong Bull +${niftyChange.toFixed(2)}%` :
+                           niftyChange > 0 ? `Mild Bull +${niftyChange.toFixed(2)}%` :
+                           niftyChange > -0.5 ? `Flat ${niftyChange.toFixed(2)}%` :
+                           `Bearish ${niftyChange.toFixed(2)}%`;
+
+        const layer1Total = sentNorm + vixScore + monthScore + trendScore; // 0–100
+        const layer1Pass  = layer1Total >= 55;
+
+        // ── LAYER 2: OPTIONS INTELLIGENCE ─────────────────────────────────────
+        // 2a. Technical indicators from NIFTY 5m chart
+        const candles = (niftyChart?.quotes || []).filter(x => x && x.close != null);
+        const cl = candles.map(x => x.close);
+        const hi = candles.map(x => x.high);
+        const lo = candles.map(x => x.low);
+        const vo = candles.map(x => x.volume || 0);
+
+        let techScore = 0, techLabel = 'Insufficient data';
+        let rsiVal = 50, emaSignal = 'FLAT', vwapRelation = 'AT';
+        let atrVal = null, stochRsiK = null;
+
+        if (cl.length >= 26) {
+            const rsiArr = RSI.calculate({ values: cl, period: 14 });
+            rsiVal = rsiArr.length ? +rsiArr[rsiArr.length - 1].toFixed(1) : 50;
+
+            const ema9  = EMA.calculate({ values: cl, period: 9 });
+            const ema21 = EMA.calculate({ values: cl, period: 21 });
+            const emaUp = ema9.length && ema21.length && ema9[ema9.length - 1] > ema21[ema21.length - 1];
+            emaSignal = emaUp ? 'BULL' : 'BEAR';
+
+            // VWAP
+            if (vo.some(v => v > 0)) {
+                const tp = candles.map(x => (x.high + x.low + x.close) / 3);
+                const tpv = tp.reduce((s, p, i) => s + p * vo[i], 0);
+                const tv = vo.reduce((a, b) => a + b, 0);
+                const vwap = tv > 0 ? tpv / tv : null;
+                if (vwap) vwapRelation = niftyPrice > vwap * 1.001 ? 'ABOVE' : niftyPrice < vwap * 0.999 ? 'BELOW' : 'AT';
+            }
+
+            // ATR
+            const atrRaw = ADX.calculate({ high: hi, low: lo, close: cl, period: 14 });
+            atrVal = atrRaw.length ? +atrRaw[atrRaw.length - 1].atr?.toFixed(1) : null;
+
+            // StochRSI
+            const stRsiArr = rsiArr.length >= 14 ? Stochastic.calculate({ high: rsiArr, low: rsiArr, close: rsiArr, period: 14, signalPeriod: 3 }) : [];
+            stochRsiK = stRsiArr.length ? +stRsiArr[stRsiArr.length - 1].k?.toFixed(1) : null;
+
+            // Compute tech score
+            if (emaUp) techScore += 10;
+            if (rsiVal > 50 && rsiVal < 70) techScore += 10;   // good zone for calls
+            if (stochRsiK && stochRsiK < 30) techScore += 8;   // oversold, bounce
+            if (stochRsiK && stochRsiK > 70) techScore -= 5;   // overbought
+            if (vwapRelation === 'ABOVE') techScore += 7;
+            techLabel = `RSI ${rsiVal} · EMA ${emaSignal} · VWAP ${vwapRelation}`;
+        }
+
+        // 2b. Volume spike analysis
+        const avgVol = vo.slice(-30, -1).reduce((a, b) => a + b, 0) / 29;
+        const lastVol = vo[vo.length - 1] || 0;
+        const volRatio = avgVol > 0 ? +(lastVol / avgVol).toFixed(2) : 1;
+        let volScore = 0;
+        if (volRatio > 2)       { volScore = 20; }
+        else if (volRatio > 1.5){ volScore = 14; }
+        else if (volRatio > 1)  { volScore = 9;  }
+        else                    { volScore = 4;  }
+        const volLabel = volRatio > 2 ? `SPIKE ×${volRatio} — Strong confirmation` :
+                         volRatio > 1.5 ? `Above avg ×${volRatio}` :
+                         `Normal ×${volRatio}`;
+
+        // 2c. IV proxy (use VIX as India IV proxy; already computed)
+        let ivScore = 0;
+        if (vix < 14)      { ivScore = 20; } // very cheap to buy
+        else if (vix < 17) { ivScore = 16; }
+        else if (vix < 21) { ivScore = 10; }
+        else               { ivScore = 4;  }
+        const ivLabel = vix < 14 ? `VIX ${vix.toFixed(1)} — Options CHEAP (ideal buy)` :
+                        vix < 17 ? `VIX ${vix.toFixed(1)} — Options affordable` :
+                        vix < 21 ? `VIX ${vix.toFixed(1)} — Moderate premium cost` :
+                                   `VIX ${vix.toFixed(1)} — EXPENSIVE, reduce size`;
+
+        // 2d. Fetch NIFTY options for PCR + OI analysis
+        let pcrScore = 10, pcrLabel = 'PCR data unavailable', pcr = null;
+        let maxPainStr = null, atmStrike = null, suggestedStrike = null;
+        try {
+            const niftyOpts = await yahooFinance.options('^NSEI').catch(() => null);
+            if (niftyOpts?.options?.[0]) {
+                const chain = niftyOpts.options[0];
+                const calls = chain.calls || [];
+                const puts  = chain.puts  || [];
+                // PCR by OI
+                const totalCallOI = calls.reduce((a, c) => a + (c.openInterest || 0), 0);
+                const totalPutOI  = puts.reduce((a, p)  => a + (p.openInterest || 0), 0);
+                pcr = totalCallOI > 0 ? +(totalPutOI / totalCallOI).toFixed(2) : null;
+                if (pcr !== null) {
+                    if (pcr > 1.5)      { pcrScore = 20; pcrLabel = `PCR ${pcr} — Very Bullish (heavy put writing)`; }
+                    else if (pcr > 1.1) { pcrScore = 16; pcrLabel = `PCR ${pcr} — Bullish`; }
+                    else if (pcr > 0.8) { pcrScore = 10; pcrLabel = `PCR ${pcr} — Neutral`; }
+                    else                { pcrScore = 4;  pcrLabel = `PCR ${pcr} — Bearish (call buying dominates)`; }
+                }
+                // ATM strike + max pain
+                atmStrike = niftyPrice > 0 ? Math.round(niftyPrice / 50) * 50 : null;
+                // Max pain: strike where total option buyers lose most
+                const strikes = [...new Set([...calls, ...puts].map(o => o.strike))].sort((a,b) => a - b);
+                if (strikes.length) {
+                    const painByStrike = strikes.map(K => {
+                        const callPain = calls.reduce((s, c) => s + (c.openInterest || 0) * Math.max(K - c.strike, 0), 0);
+                        const putPain  = puts.reduce((s, p)  => s + (p.openInterest || 0) * Math.max(p.strike - K, 0), 0);
+                        return { strike: K, pain: callPain + putPain };
+                    });
+                    const mp = painByStrike.sort((a, b) => a.pain - b.pain)[0];
+                    maxPainStr = mp ? mp.strike : null;
+                }
+                // Suggested strike based on ATM + Namit's edge (OTM 1-2 steps for scalping, or ITM for conviction)
+                if (atmStrike && atrVal) {
+                    suggestedStrike = niftyChange > 0.5
+                        ? { ce: atmStrike, rationale: 'ATM CE (trend confirmed above 0.5%)', premium: 'ATM' }
+                        : { ce: atmStrike - 50, rationale: 'Slight OTM CE (scalp mode)', premium: 'OTM' };
+                }
+            }
+        } catch {}
+
+        // 2e. Pattern: trend + stochRSI confluence
+        let patternScore = 0, patternLabel = 'No clear pattern';
+        if (emaSignal === 'BULL' && rsiVal > 45 && rsiVal < 68 && vwapRelation === 'ABOVE') {
+            patternScore = 20; patternLabel = 'MOMENTUM: EMA bull + RSI healthy + above VWAP';
+        } else if (stochRsiK && stochRsiK < 25 && emaSignal === 'BULL') {
+            patternScore = 18; patternLabel = 'BOUNCE: StochRSI oversold + bullish EMA structure';
+        } else if (stochRsiK && stochRsiK < 25) {
+            patternScore = 12; patternLabel = 'OVERSOLD BOUNCE: StochRSI < 25 (watch for reversal)';
+        } else if (emaSignal === 'BULL') {
+            patternScore = 10; patternLabel = 'MILD BULL: EMA9 > EMA21';
+        } else if (emaSignal === 'BEAR' && rsiVal < 40) {
+            patternScore = 2;  patternLabel = 'BEARISH: Below EMAs + RSI weak — Consider PUT';
+        }
+
+        const layer2Total = Math.min(100, techScore + volScore + ivScore + pcrScore + patternScore);
+        const layer2Pass  = layer2Total >= 55;
+
+        // ── FINAL RECOMMENDATION ─────────────────────────────────────────────
+        const combinedScore = (layer1Total * 0.45 + layer2Total * 0.55);
+        let finalSignal, signalColor, action;
+        if (!layer1Pass) {
+            finalSignal = 'WAIT — Market conditions unfavourable';
+            signalColor = 'WARN'; action = 'STAND_DOWN';
+        } else if (!layer2Pass) {
+            finalSignal = 'PREPARE — Layer 1 clear, wait for technical entry';
+            signalColor = 'WARN'; action = 'WATCH';
+        } else if (combinedScore >= 75) {
+            finalSignal = 'HIGH CONVICTION — Enter intraday CE';
+            signalColor = 'BULL'; action = 'BUY_CE';
+        } else if (combinedScore >= 60) {
+            finalSignal = 'MODERATE — Scalp opportunity, small size';
+            signalColor = 'BULL'; action = 'SCALP_CE';
+        } else if (emaSignal === 'BEAR' && sentLabel.includes('BEAR') && rsiVal < 42) {
+            finalSignal = 'PUT OPPORTUNITY — Bearish confluence';
+            signalColor = 'BEAR'; action = 'BUY_PE';
+        } else {
+            finalSignal = 'WAIT — Mixed signals';
+            signalColor = 'NEUTRAL'; action = 'WAIT';
+        }
+
+        // Namit-specific edge rules
+        const edgeAlerts = [];
+        if (mData.pnl < -200000) edgeAlerts.push(`⚠ ${mData.m} is historically your WORST month (${mData.wr}% WR). Trade minimum size.`);
+        if (vix > 22) edgeAlerts.push('⚠ VIX > 22: Options expensive. Your avg loss balloons when VIX is high.');
+        if (niftyChange < -0.3) edgeAlerts.push('⚠ NIFTY down: You lose 60% of calls bought on down days. Consider PE or WAIT.');
+        if (volRatio < 0.8) edgeAlerts.push('⚠ Low volume: Thin market. Your intraday edge requires volume confirmation.');
+        edgeAlerts.push('✓ RULE #1: INTRADAY ONLY — Your overnight/multiday P&L is -₹31L vs intraday +₹12L');
+        if (action !== 'STAND_DOWN') edgeAlerts.push('✓ RULE #2: No averaging down — 626 positions cost you -₹5.3L');
+
+        const result = {
+            timestamp: new Date().toISOString(),
+            isMarketHours, niftyPrice, niftyChange, vix, bankNifty, bankChange,
+            layer1: {
+                score: +layer1Total.toFixed(1),
+                pass: layer1Pass,
+                signals: {
+                    sentiment: { score: +sentNorm.toFixed(1), label: sentLabel, doubleCheck: sentDoubleCheck, rawScore: sentScore, strongBull: strongBullCount, strongBear: strongBearCount },
+                    vix:       { score: vixScore, value: +vix.toFixed(1), label: vixLabel },
+                    month:     { score: monthScore, month: mData.m, wr: mData.wr, pnl: mData.pnl, label: monthLabel },
+                    trend:     { score: trendScore, change: +niftyChange.toFixed(2), label: trendLabel },
+                },
+            },
+            layer2: {
+                score: +layer2Total.toFixed(1),
+                pass: layer2Pass,
+                signals: {
+                    technical: { score: techScore, rsi: rsiVal, ema: emaSignal, vwap: vwapRelation, atr: atrVal, stochRsi: stochRsiK, label: techLabel },
+                    volume:    { score: volScore, ratio: volRatio, label: volLabel },
+                    iv:        { score: ivScore, vix: +vix.toFixed(1), label: ivLabel },
+                    pcr:       { score: pcrScore, value: pcr, label: pcrLabel },
+                    pattern:   { score: patternScore, label: patternLabel },
+                },
+                options: { atmStrike, maxPain: maxPainStr, suggested: suggestedStrike, pcr },
+            },
+            recommendation: {
+                signal: finalSignal, color: signalColor, action,
+                combinedScore: +combinedScore.toFixed(1),
+                holdRule: 'INTRADAY ONLY (exit by 15:15 IST)',
+                edgeAlerts,
+            },
+            traderProfile: TRADER_EDGE,
+        };
+
+        personalModelCache = result;
+        pmCacheTs = Date.now();
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Serve React build in production
 if (process.env.NODE_ENV === 'production') {
     // Cache static assets for 7 days (hashed filenames change on rebuild)

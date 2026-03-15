@@ -360,6 +360,9 @@ export default function App() {
     // F&O Scanner
     const [foData, setFoData] = useState(null);
     const [foLoading, setFoLoading] = useState(false);
+    // Personal Model
+    const [pmData, setPmData] = useState(null);
+    const [pmLoading, setPmLoading] = useState(false);
 
     // Alerts
     const [alerts, setAlerts] = useState(() => {
@@ -525,6 +528,14 @@ export default function App() {
             const r = await fetch(`${API}/fo-scanner`).then(x => x.json());
             setFoData(Array.isArray(r) ? r : []);
         } catch { setFoData([]); } finally { setFoLoading(false); }
+    }, []);
+
+    const fetchPM = useCallback(async () => {
+        setPmLoading(true);
+        try {
+            const r = await fetch(`${API}/personal-model`).then(x => x.json());
+            setPmData(r);
+        } catch {} finally { setPmLoading(false); }
     }, []);
 
     const fetchSuggestions = useCallback((q) => {
@@ -2049,8 +2060,8 @@ export default function App() {
                                     </form>
                                 </div>
                                 <div className="hft-tabs">
-                                    {[['dashboard','⊞ DASHBOARD'],['signals','⊿ SIGNALS'],['fo','⚡ F&O MODEL'],['journal','✎ JOURNAL'],['patterns','◉ PATTERNS']].map(([tab,label]) => (
-                                        <button key={tab} className={`hft-tab-btn${hftTab === tab ? ' active' : ''}${tab === 'fo' ? ' hft-fo-tab' : ''}`} onClick={() => { setHftTab(tab); if (tab === 'signals') fetchHFT(hftTicker); if (tab === 'fo') fetchFO(); }}>{label}</button>
+                                    {[['dashboard','⊞ DASHBOARD'],['signals','⊿ SIGNALS'],['mymodel','◎ MY MODEL'],['fo','⚡ F&O MODEL'],['journal','✎ JOURNAL'],['patterns','◉ PATTERNS']].map(([tab,label]) => (
+                                        <button key={tab} className={`hft-tab-btn${hftTab === tab ? ' active' : ''}${tab === 'fo' ? ' hft-fo-tab' : ''}${tab === 'mymodel' ? ' hft-pm-tab' : ''}`} onClick={() => { setHftTab(tab); if (tab === 'signals') fetchHFT(hftTicker); if (tab === 'fo') fetchFO(); if (tab === 'mymodel') fetchPM(); }}>{label}</button>
                                     ))}
                                     <button className="hft-logout-btn" onClick={() => { localStorage.removeItem('hft_auth'); setHftLoggedIn(false); }}>⏻ LOGOUT</button>
                                 </div>
@@ -2328,6 +2339,191 @@ export default function App() {
                                     </div>
                                 </div>
                             )}
+
+                            {/* ── MY PERSONAL MODEL TAB ── */}
+                            {hftTab === 'mymodel' && (() => {
+                                const pm = pmData;
+                                const scoreColor = s => s >= 70 ? 'var(--pos)' : s >= 50 ? 'var(--warn)' : 'var(--neg)';
+                                const passColor  = p => p ? 'var(--pos)' : 'var(--neg)';
+                                const SigRow = ({ label, score, max = 25, detail }) => (
+                                    <div className="pm-sig-row">
+                                        <div className="pm-sig-label">{label}</div>
+                                        <div className="pm-sig-bar-wrap">
+                                            <div className="pm-sig-bar" style={{ width: `${(score/max)*100}%`, background: scoreColor(score/max*100) }} />
+                                        </div>
+                                        <div className="pm-sig-score" style={{ color: scoreColor(score/max*100) }}>{score}/{max}</div>
+                                        <div className="pm-sig-detail">{detail}</div>
+                                    </div>
+                                );
+                                return (
+                                <div className="pm-wrap">
+                                    {/* Header */}
+                                    <div className="pm-header">
+                                        <div className="pm-title-block">
+                                            <span className="pm-icon">◎</span>
+                                            <div>
+                                                <div className="pm-title">NAMIT'S PERSONAL MODEL <span className="hft-private-badge">3Y DATA</span></div>
+                                                <div className="pm-sub">2-Layer signal engine · Built from 3,121 real trades · FY24–FY26</div>
+                                            </div>
+                                        </div>
+                                        <button className="pm-refresh" onClick={fetchPM} disabled={pmLoading}>
+                                            {pmLoading ? '⟳ RUNNING...' : '⟳ RUN MODEL'}
+                                        </button>
+                                    </div>
+
+                                    {pmLoading && (
+                                        <div className="pm-loading">
+                                            <div className="pm-spinner" />
+                                            <span>Fetching live data · Running 2-layer analysis...</span>
+                                        </div>
+                                    )}
+
+                                    {!pmLoading && !pm && (
+                                        <div className="pm-empty">
+                                            <div style={{ fontSize: 40, opacity: 0.2 }}>◎</div>
+                                            <div>Click RUN MODEL to analyse today's market conditions</div>
+                                            <div style={{ fontSize: 10, opacity: 0.5 }}>Combines live sentiment, VIX, options data, and your personal edge</div>
+                                        </div>
+                                    )}
+
+                                    {!pmLoading && pm && pm.error && (
+                                        <div className="pm-empty"><div style={{ color: 'var(--neg)' }}>Error: {pm.error}</div></div>
+                                    )}
+
+                                    {!pmLoading && pm && !pm.error && (() => {
+                                        const { layer1: L1, layer2: L2, recommendation: rec, niftyPrice, niftyChange, vix, traderProfile: tp } = pm;
+                                        return (
+                                        <>
+                                        {/* Live snapshot */}
+                                        <div className="pm-live-row">
+                                            <div className="pm-live-chip">NIFTY <span style={{ color: niftyChange >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{niftyPrice?.toLocaleString('en-IN')} ({niftyChange >= 0 ? '+' : ''}{niftyChange?.toFixed(2)}%)</span></div>
+                                            <div className="pm-live-chip">VIX <span style={{ color: vix < 15 ? 'var(--pos)' : vix < 20 ? 'var(--warn)' : 'var(--neg)' }}>{vix?.toFixed(1)}</span></div>
+                                            <div className="pm-live-chip">BANK <span style={{ color: pm.bankChange >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{pm.bankNifty?.toLocaleString('en-IN')}</span></div>
+                                            <div className="pm-live-chip" style={{ marginLeft: 'auto' }}>
+                                                <span style={{ color: pm.isMarketHours ? 'var(--pos)' : 'var(--warn)' }}>
+                                                    {pm.isMarketHours ? '● MARKET OPEN' : '○ MARKET CLOSED'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Final signal banner */}
+                                        <div className={`pm-signal-banner pm-signal-${rec.color.toLowerCase()}`}>
+                                            <div className="pm-signal-score">{rec.combinedScore}</div>
+                                            <div className="pm-signal-text">
+                                                <div className="pm-signal-main">{rec.signal}</div>
+                                                <div className="pm-signal-sub">{rec.holdRule}</div>
+                                            </div>
+                                            {L2.options?.atmStrike && (
+                                                <div className="pm-signal-strike">
+                                                    <div className="pm-ss-label">NIFTY ATM</div>
+                                                    <div className="pm-ss-val">{L2.options.atmStrike}</div>
+                                                    {L2.options.maxPain && <div className="pm-ss-sub">Max Pain {L2.options.maxPain}</div>}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Edge alerts */}
+                                        <div className="pm-alerts">
+                                            {rec.edgeAlerts.map((a, i) => (
+                                                <div key={i} className={`pm-alert ${a.startsWith('⚠') ? 'pm-alert-warn' : 'pm-alert-ok'}`}>{a}</div>
+                                            ))}
+                                        </div>
+
+                                        {/* 2-layer grid */}
+                                        <div className="pm-layers">
+                                            {/* Layer 1 */}
+                                            <div className="pm-layer">
+                                                <div className="pm-layer-hdr">
+                                                    <span className="pm-layer-num">LAYER 1</span>
+                                                    <span className="pm-layer-name">MARKET SENTIMENT</span>
+                                                    <span className="pm-layer-score" style={{ color: passColor(L1.pass) }}>{L1.score}/100</span>
+                                                    <span className={`pm-layer-badge ${L1.pass ? 'pm-badge-pass' : 'pm-badge-fail'}`}>{L1.pass ? '✓ PASS' : '✗ FAIL'}</span>
+                                                </div>
+                                                <div className="pm-sigs">
+                                                    <SigRow label="NEWS SENTIMENT" score={+L1.signals.sentiment.score.toFixed(0)} detail={`${L1.signals.sentiment.label} · ${L1.signals.sentiment.doubleCheck.replace('_',' ')} · ${L1.signals.sentiment.strongBull}↑ ${L1.signals.sentiment.strongBear}↓ signals`} />
+                                                    <SigRow label="INDIA VIX" score={L1.signals.vix.score} detail={L1.signals.vix.label} />
+                                                    <SigRow label="MONTH FILTER" score={L1.signals.month.score} detail={L1.signals.month.label} />
+                                                    <SigRow label="NIFTY TREND" score={L1.signals.trend.score} detail={L1.signals.trend.label} />
+                                                </div>
+                                            </div>
+
+                                            {/* Layer 2 */}
+                                            <div className="pm-layer">
+                                                <div className="pm-layer-hdr">
+                                                    <span className="pm-layer-num">LAYER 2</span>
+                                                    <span className="pm-layer-name">OPTIONS · IV · PATTERN · VOLUME</span>
+                                                    <span className="pm-layer-score" style={{ color: passColor(L2.pass) }}>{L2.score}/100</span>
+                                                    <span className={`pm-layer-badge ${L2.pass ? 'pm-badge-pass' : 'pm-badge-fail'}`}>{L2.pass ? '✓ PASS' : '✗ FAIL'}</span>
+                                                </div>
+                                                <div className="pm-sigs">
+                                                    <SigRow label="TECHNICALS" score={L2.signals.technical.score} max={35} detail={L2.signals.technical.label} />
+                                                    <SigRow label="VOLUME" score={L2.signals.volume.score} max={20} detail={L2.signals.volume.label} />
+                                                    <SigRow label="IV / VIX" score={L2.signals.iv.score} max={20} detail={L2.signals.iv.label} />
+                                                    <SigRow label="PUT-CALL RATIO" score={L2.signals.pcr.score} max={20} detail={L2.signals.pcr.label} />
+                                                    <SigRow label="PATTERN" score={L2.signals.pattern.score} max={20} detail={L2.signals.pattern.label} />
+                                                </div>
+                                                {L2.options?.suggested && (
+                                                    <div className="pm-strike-box">
+                                                        <span className="pm-sb-label">SUGGESTED</span>
+                                                        <span className="pm-sb-strike">NIFTY {L2.options.suggested.ce} CE</span>
+                                                        <span className="pm-sb-note">{L2.options.suggested.rationale}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Personal edge stats */}
+                                        <div className="pm-edge-section">
+                                            <div className="pm-edge-hdr">YOUR PERSONAL EDGE — DERIVED FROM {tp.totalTrades.toLocaleString()} REAL TRADES</div>
+                                            <div className="pm-edge-grid">
+                                                <div className="pm-edge-card pm-edge-pos">
+                                                    <div className="pm-ec-lbl">INTRADAY P&L</div>
+                                                    <div className="pm-ec-val">+₹{(tp.intradayPnl/100000).toFixed(1)}L</div>
+                                                    <div className="pm-ec-sub">2,085 intraday trades</div>
+                                                </div>
+                                                <div className="pm-edge-card pm-edge-neg">
+                                                    <div className="pm-ec-lbl">MULTI-DAY P&L</div>
+                                                    <div className="pm-ec-val">-₹{Math.abs((tp.multidayPnl+tp.overnightPnl)/100000).toFixed(1)}L</div>
+                                                    <div className="pm-ec-sub">1,036 held overnight+</div>
+                                                </div>
+                                                <div className="pm-edge-card pm-edge-pos">
+                                                    <div className="pm-ec-lbl">BEST STOCKS</div>
+                                                    <div className="pm-ec-val" style={{ fontSize: 10, lineHeight: 1.6 }}>{tp.edgeStocks.slice(0,6).join(' · ')}</div>
+                                                    <div className="pm-ec-sub">Your edge universe</div>
+                                                </div>
+                                                <div className="pm-edge-card pm-edge-neg">
+                                                    <div className="pm-ec-lbl">AVOID LIST</div>
+                                                    <div className="pm-ec-val" style={{ fontSize: 10, lineHeight: 1.6 }}>{tp.avoidStocks.slice(0,5).join(' · ')}</div>
+                                                    <div className="pm-ec-sub">Historically weak for you</div>
+                                                </div>
+                                            </div>
+
+                                            {/* Monthly heatmap */}
+                                            <div className="pm-monthly-hdr">MONTHLY WIN-RATE HEATMAP (your 3-year history)</div>
+                                            <div className="pm-monthly-grid">
+                                                {tp.monthly.map((m, i) => {
+                                                    const isNow = new Date().getMonth() === i;
+                                                    const bgColor = m.pnl > 200000 ? 'rgba(16,185,129,0.25)' :
+                                                                    m.pnl > 0      ? 'rgba(16,185,129,0.12)' :
+                                                                    m.pnl > -200000? 'rgba(234,179,8,0.1)' : 'rgba(239,68,68,0.18)';
+                                                    return (
+                                                        <div key={m.m} className={`pm-month-cell${isNow ? ' pm-month-now' : ''}`} style={{ background: bgColor }}>
+                                                            <div className="pm-mc-month">{m.m}</div>
+                                                            <div className="pm-mc-wr" style={{ color: m.wr >= 50 ? 'var(--pos)' : m.wr >= 42 ? 'var(--warn)' : 'var(--neg)' }}>{m.wr}%</div>
+                                                            <div className="pm-mc-pnl" style={{ color: m.pnl >= 0 ? 'var(--pos)' : 'var(--neg)', fontSize: 8 }}>
+                                                                {m.pnl >= 0 ? '+' : ''}{(m.pnl/1000).toFixed(0)}K
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                        </>
+                                        );
+                                    })()}
+                                </div>
+                                );
+                            })()}
 
                             {/* F&O MODEL TAB */}
                             {hftTab === 'fo' && (
