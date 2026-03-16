@@ -2667,20 +2667,45 @@ app.get('/api/backtest', async (req, res) => {
     try {
         const { strategy = 'vwap-trend', period = '1y', interval = '1h' } = req.query;
 
-        // ── 1. Fetch NIFTY historical data ────────────────────────────────────
+        // ── 1. Fetch NIFTY + VIX historical data ─────────────────────────────
         const p1 = new Date();
         const months = period === '2y' ? 24 : period === '6m' ? 6 : 12;
         p1.setMonth(p1.getMonth() - months);
 
-        // Yahoo Finance: 1h gives ~730 days, 1d gives full history
         const useHourly = interval !== '1d';
-        const raw = await yahooFinance.chart('^NSEI', {
-            interval: useHourly ? '1h' : '1d',
-            period1: p1,
-        }).catch(() => null);
+        const [raw, vixRaw] = await Promise.all([
+            yahooFinance.chart('^NSEI',     { interval: useHourly ? '1h' : '1d', period1: p1 }).catch(() => null),
+            yahooFinance.chart('^INDIAVIX', { interval: '1d', period1: p1 }).catch(() => null),
+        ]);
 
         let quotes = (raw?.quotes || []).filter(q => q && q.close != null && q.high != null && q.low != null);
         if (quotes.length < 60) return res.status(400).json({ error: 'Not enough historical data from Yahoo Finance. Try a shorter period or daily interval.' });
+
+        // Helper: IST date string
+        const istDay = (d) => new Date(new Date(d).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+
+        // VIX by IST date
+        const vixByDate = {};
+        (vixRaw?.quotes || []).forEach(q => {
+            if (q && q.close != null) vixByDate[istDay(q.date)] = q.close;
+        });
+
+        // Daily % change by IST date (for Layer 1 trend score)
+        const dailyChangeByDate = {};
+        if (useHourly) {
+            const groups = {};
+            quotes.forEach(q => { const d = istDay(q.date); (groups[d] = groups[d] || []).push(q); });
+            const days = Object.keys(groups).sort();
+            for (let i = 1; i < days.length; i++) {
+                const pc = groups[days[i-1]].at(-1).close;
+                const cc = groups[days[i]].at(-1).close;
+                dailyChangeByDate[days[i]] = (cc - pc) / pc * 100;
+            }
+        } else {
+            for (let i = 1; i < quotes.length; i++) {
+                dailyChangeByDate[istDay(quotes[i].date)] = (quotes[i].close - quotes[i-1].close) / quotes[i-1].close * 100;
+            }
+        }
 
         // ── 2. Compute indicators ─────────────────────────────────────────────
         const closes  = quotes.map(q => q.close);
@@ -2689,11 +2714,26 @@ app.get('/api/backtest', async (req, res) => {
         const macdH   = btMACD(closes);
         const rsiArr  = btRSI(closes, 14);
         const atrArr  = btATR(quotes, 14);
-        const vwapArr = useHourly ? btVWAP(quotes) : closes.map(() => null); // VWAP only for intraday
+        const vwapArr = useHourly ? btVWAP(quotes) : closes.map(() => null);
+
+        // ── Layer 1 filter (backtest version — VIX + trend only, month score removed)
+        // Max 50 pts. Threshold: 28 = ~55% of 50.
+        function btLayer1(bar) {
+            const d = istDay(bar.date);
+
+            const vix = vixByDate[d] || 15;
+            const vixScore = vix < 12 ? 25 : vix < 15 ? 22 : vix < 18 ? 18 : vix < 22 ? 12 : vix < 28 ? 6 : 2;
+
+            const chg = dailyChangeByDate[d] || 0;
+            const trendScore = chg > 1 ? 25 : chg > 0.3 ? 20 : chg > 0 ? 14 : chg > -0.5 ? 8 : 2;
+
+            const total = vixScore + trendScore;
+            return { total, pass: total >= 28, vixScore, trendScore };
+        }
 
         // ── 3. Signal logic ────────────────────────────────────────────────────
-        // Returns 'LONG' | 'SHORT' | null for each bar
         function getSignal(i) {
+            const bar = quotes[i];
             const e9 = ema9[i], e21 = ema21[i], m = macdH[i], r = rsiArr[i], a = atrArr[i], v = vwapArr[i];
             if (e9 == null || e21 == null || m == null || r == null || a == null) return null;
             const emaBull = e9 > e21, emaBear = e9 < e21;
@@ -2701,23 +2741,40 @@ app.get('/api/backtest', async (req, res) => {
             const belowVwap = v != null ? closes[i] < v : emaBear;
 
             if (strategy === 'vwap-trend') {
-                // Buy: EMA bull + MACD hist positive + RSI healthy + above VWAP
                 if (emaBull && m > 0 && r > 45 && r < 70 && aboveVwap) return 'LONG';
                 if (emaBear && m < 0 && r < 55 && r > 30 && belowVwap) return 'SHORT';
+
+            } else if (strategy === 'vwap-enhanced') {
+                // Enhanced VWAP: above/below VWAP + MACD momentum increasing + volume above average
+                // More selective than vwap-trend: requires MACD hist growing (momentum building)
+                const pm = macdH[i - 1];
+                const macdGrowing  = pm != null && m > pm && m > 0;   // hist increasing bullish
+                const macdFalling  = pm != null && m < pm && m < 0;   // hist falling bearish
+                const avgVol = quotes.slice(Math.max(0, i-10), i).reduce((s, q) => s + (q.volume||0), 0) / 10;
+                const volOk  = avgVol > 0 ? (bar.volume || 0) > avgVol * 1.05 : true;
+                if (emaBull && aboveVwap && macdGrowing && r > 45 && r < 72 && volOk) return 'LONG';
+                if (emaBear && belowVwap && macdFalling && r < 55 && r > 28 && volOk) return 'SHORT';
+
+            } else if (strategy === 'namit-l1') {
+                // Namit's Layer 1 macro filter gates all entries
+                // Passes only when VIX favourable + good calendar month + trend aligned
+                if (!btLayer1(bar).pass) return null;
+                if (emaBull && aboveVwap && m > 0 && r > 48 && r < 70) return 'LONG';
+                if (emaBear && belowVwap && m < 0 && r < 52 && r > 30) return 'SHORT';
+
             } else if (strategy === 'macd-cross') {
-                // Fresh MACD cross only
                 const pm = macdH[i - 1];
                 if (pm != null && pm <= 0 && m > 0 && emaBull && r > 40) return 'LONG';
                 if (pm != null && pm >= 0 && m < 0 && emaBear && r < 60) return 'SHORT';
+
             } else if (strategy === 'ema-cross') {
-                // Fresh EMA crossover
                 const pe9 = ema9[i - 1], pe21 = ema21[i - 1];
                 if (pe9 != null && pe21 != null) {
                     if (pe9 <= pe21 && e9 > e21 && r > 45 && r < 70) return 'LONG';
                     if (pe9 >= pe21 && e9 < e21 && r < 55 && r > 30) return 'SHORT';
                 }
+
             } else if (strategy === 'rsi-reversal') {
-                // Oversold bounce / overbought reversal
                 const pr = rsiArr[i - 1];
                 if (pr != null && pr < 32 && r >= 32 && emaBull) return 'LONG';
                 if (pr != null && pr > 68 && r <= 68 && emaBear) return 'SHORT';
@@ -2732,9 +2789,6 @@ app.get('/api/backtest', async (req, res) => {
         let equity = 0;
         const equityCurve = [{ date: quotes[0].date, equity: 0 }];
         const monthlyPnl = {};
-
-        // Helper: get IST date string
-        const istDay = (d) => new Date(new Date(d).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
 
         for (let i = 26; i < quotes.length; i++) {
             const bar = quotes[i];

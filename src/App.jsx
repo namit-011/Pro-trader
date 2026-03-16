@@ -2872,10 +2872,12 @@ export default function App() {
                             {/* ── BACKTEST TAB ── */}
                             {hftTab === 'backtest' && (() => {
                                 const BT_STRATEGIES = [
-                                    { id: 'vwap-trend',   label: 'VWAP Trend',        desc: 'EMA bull + MACD+ + RSI 45–70 + above VWAP' },
-                                    { id: 'macd-cross',   label: 'MACD Cross',         desc: 'Fresh MACD histogram crossover + EMA confirmation' },
-                                    { id: 'ema-cross',    label: 'EMA Crossover',      desc: 'EMA 9 crosses EMA 21 with RSI filter' },
-                                    { id: 'rsi-reversal', label: 'RSI Reversal',       desc: 'Oversold bounce (<32→32) or overbought fade (>68→68)' },
+                                    { id: 'vwap-trend',    label: 'VWAP Trend',         desc: 'EMA bull + MACD+ + RSI 45–70 + above VWAP' },
+                                    { id: 'vwap-enhanced', label: '★ VWAP Enhanced',    desc: 'VWAP reclaim/breakdown + volume spike + MACD confirmation', badge: 'NEW' },
+                                    { id: 'namit-l1',      label: '★ Namit Layer 1',    desc: 'Your VIX+month+trend macro filter gates all entries', badge: 'PERSONAL' },
+                                    { id: 'macd-cross',    label: 'MACD Cross',          desc: 'Fresh MACD histogram crossover + EMA confirmation' },
+                                    { id: 'ema-cross',     label: 'EMA Crossover',       desc: 'EMA 9 crosses EMA 21 with RSI filter' },
+                                    { id: 'rsi-reversal',  label: 'RSI Reversal',        desc: 'Oversold bounce (<32→32) or overbought fade (>68→68)' },
                                 ];
                                 const s = btResult?.stats;
                                 // Equity curve SVG
@@ -2925,7 +2927,7 @@ export default function App() {
                                     {/* Header */}
                                     <div className="bt-hdr">
                                         <div className="bt-title">NIFTY STRATEGY BACKTEST</div>
-                                        <div className="bt-sub">Powered by Yahoo Finance · 1hr candles · NIFTY 50 index</div>
+                                        <div className="bt-sub">Powered by Yahoo Finance · NIFTY 50 · ★ = includes your personal Layer 1 filter (VIX + trend)</div>
                                     </div>
 
                                     {/* Controls */}
@@ -2933,9 +2935,12 @@ export default function App() {
                                         <div className="bt-strategy-grid">
                                             {BT_STRATEGIES.map(st => (
                                                 <div key={st.id}
-                                                    className={`bt-strat-card${btParams.strategy === st.id ? ' active' : ''}`}
+                                                    className={`bt-strat-card${btParams.strategy === st.id ? ' active' : ''}${st.id.startsWith('namit') ? ' bt-strat-personal' : ''}`}
                                                     onClick={() => setBtParams(p => ({...p, strategy: st.id}))}>
-                                                    <div className="bt-strat-name">{st.label}</div>
+                                                    <div className="bt-strat-name">
+                                                        {st.label}
+                                                        {st.badge && <span className={`bt-strat-badge bt-badge-${st.badge.toLowerCase()}`}>{st.badge}</span>}
+                                                    </div>
                                                     <div className="bt-strat-desc">{st.desc}</div>
                                                 </div>
                                             ))}

@@ -2763,7 +2763,7 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
 
 /* Strategy grid */
 .bt-strategy-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
 }
 .bt-strat-card {
     background: rgba(255,255,255,0.03); border: 1px solid var(--border2);
@@ -2772,10 +2772,18 @@ button { cursor: pointer; font-family: var(--font); border: none; outline: none;
     display: flex; flex-direction: column; gap: 4px;
 }
 .bt-strat-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.18); }
-.bt-strat-card.active {
-    background: rgba(167,139,250,0.12); border-color: #a78bfa;
+.bt-strat-card.active { background: rgba(167,139,250,0.12); border-color: #a78bfa; }
+.bt-strat-personal { border-color: rgba(251,191,36,0.25) !important; }
+.bt-strat-personal.active { background: rgba(251,191,36,0.1) !important; border-color: #fbbf24 !important; }
+.bt-strat-name {
+    font-size: 10px; font-weight: 800; color: var(--text); letter-spacing: 0.3px;
+    display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
 }
-.bt-strat-name { font-size: 10px; font-weight: 800; color: var(--text); letter-spacing: 0.3px; }
+.bt-strat-badge {
+    font-size: 7px; font-weight: 800; letter-spacing: 0.5px; padding: 1px 5px; border-radius: 3px;
+}
+.bt-badge-new      { background: rgba(16,185,129,0.15); color: var(--pos); }
+.bt-badge-personal { background: rgba(251,191,36,0.15); color: #fbbf24; }
 .bt-strat-desc { font-size: 9px; color: var(--muted); line-height: 1.4; }
 
 /* Param row */
