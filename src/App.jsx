@@ -288,6 +288,57 @@ function CountryModal({ modal, onClose }) {
     );
 }
 
+// ── Risk Calculator Component ──
+function RiskCalc() {
+    const [rc, setRc] = useState({ capital: '', riskPct: '1', entry: '', sl: '', lotSize: '50' });
+    const cap = parseFloat(rc.capital) || 0;
+    const entry = parseFloat(rc.entry) || 0;
+    const sl = parseFloat(rc.sl) || 0;
+    const riskPct = parseFloat(rc.riskPct) || 1;
+    const lotSize = parseInt(rc.lotSize) || 1;
+    const maxRisk = cap * riskPct / 100;
+    const pointRisk = entry > 0 && sl > 0 ? Math.abs(entry - sl) : 0;
+    const lots = pointRisk > 0 ? Math.floor(maxRisk / (pointRisk * lotSize)) : 0;
+    const actualRisk = lots * pointRisk * lotSize;
+    const rrTarget = entry > 0 && sl > 0 ? entry + 1.5 * (entry - sl) : 0;
+    return (
+        <div className="hft-risk-calc">
+            <div className="hft-form-hdr">⚖ POSITION SIZE CALCULATOR</div>
+            <div className="hft-rc-grid">
+                <div className="hft-form-field">
+                    <label>CAPITAL ₹</label>
+                    <input type="number" value={rc.capital} onChange={e => setRc(r => ({...r, capital: e.target.value}))} placeholder="500000" />
+                </div>
+                <div className="hft-form-field">
+                    <label>RISK %</label>
+                    <input type="number" step="0.1" value={rc.riskPct} onChange={e => setRc(r => ({...r, riskPct: e.target.value}))} placeholder="1" />
+                </div>
+                <div className="hft-form-field">
+                    <label>ENTRY ₹</label>
+                    <input type="number" value={rc.entry} onChange={e => setRc(r => ({...r, entry: e.target.value}))} placeholder="18500" />
+                </div>
+                <div className="hft-form-field">
+                    <label>STOP LOSS ₹</label>
+                    <input type="number" value={rc.sl} onChange={e => setRc(r => ({...r, sl: e.target.value}))} placeholder="18400" />
+                </div>
+                <div className="hft-form-field">
+                    <label>LOT SIZE</label>
+                    <input type="number" value={rc.lotSize} onChange={e => setRc(r => ({...r, lotSize: e.target.value}))} placeholder="50" />
+                </div>
+            </div>
+            {cap > 0 && entry > 0 && sl > 0 && (
+                <div className="hft-rc-result">
+                    <div className="hft-rc-row"><span>MAX RISK</span><strong className="neg">₹{maxRisk.toLocaleString('en-IN', {maximumFractionDigits:0})}</strong></div>
+                    <div className="hft-rc-row"><span>POINT RISK</span><strong className="warn">{pointRisk.toFixed(1)} pts</strong></div>
+                    <div className="hft-rc-row"><span>LOTS TO TRADE</span><strong className="pos">{lots}</strong></div>
+                    <div className="hft-rc-row"><span>ACTUAL RISK</span><strong>₹{actualRisk.toLocaleString('en-IN', {maximumFractionDigits:0})}</strong></div>
+                    <div className="hft-rc-row"><span>1:1.5 TARGET</span><strong className="pos">{rrTarget > 0 ? rrTarget.toFixed(1) : '—'}</strong></div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ── App ──
 export default function App() {
     // Views: geopulse | terminal | signals
@@ -1529,26 +1580,36 @@ export default function App() {
                                                                 <div><span>MAX PAIN</span><strong className="warn">{fmtCur(options.maxPain, cur)}</strong></div>
                                                                 <div><span>CALL OI</span><strong className="neg">{((options.totalCallOI||0)/1000).toFixed(0)}K</strong></div>
                                                                 <div><span>PUT OI</span><strong className="pos">{((options.totalPutOI||0)/1000).toFixed(0)}K</strong></div>
+                                                                {d.technicals?.ivRank != null && (
+                                                                    <div className="tsr-iv-rank">
+                                                                        <span>IV RANK</span>
+                                                                        <strong style={{ color: d.technicals.ivRank > 70 ? 'var(--neg)' : d.technicals.ivRank < 30 ? 'var(--pos)' : 'var(--warn)' }}>{d.technicals.ivRank}</strong>
+                                                                        <span className="tsr-ivr-note">{d.technicals.ivRank > 70 ? 'SELL OPTS' : d.technicals.ivRank < 30 ? 'BUY OPTS' : 'NEUTRAL'}</span>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                             <div className="tsr-chain-hdr">
-                                                                <span>LTP</span><span>IV%</span><span>OI(K)</span>
+                                                                <span>LTP</span><span>IV%</span><span>OI(K)</span><span>ΔΔOI</span>
                                                                 <span className="tsr-strike-col">STRIKE</span>
-                                                                <span>OI(K)</span><span>IV%</span><span>LTP</span>
+                                                                <span>ΔΔOI</span><span>OI(K)</span><span>IV%</span><span>LTP</span>
                                                             </div>
                                                             {mini.map(strike => {
                                                                 const c=cm[strike], p=pm[strike];
                                                                 const isAtm = Math.abs(strike-d.price)/d.price < 0.015;
                                                                 const isMp = strike === options.maxPain;
+                                                                const fmtOIChg = v => v == null || v === 0 ? '—' : (v > 0 ? '+' : '') + (Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+'K' : v);
                                                                 return (
                                                                     <div key={strike} className={`tsr-chain-row${isAtm?' atm':''}${isMp?' mp':''}`}>
                                                                         <span className="tsr-call">{c ? c.lastPrice.toFixed(1) : '—'}</span>
                                                                         <span className="tsr-call">{c ? (c.iv??'—')+'%' : '—'}</span>
                                                                         <span className="tsr-call">{c ? (c.oi/1000).toFixed(0) : '—'}</span>
+                                                                        <span className="tsr-call tsr-oi-chg" style={{ color: c?.oiChange > 0 ? 'var(--pos)' : c?.oiChange < 0 ? 'var(--neg)' : 'var(--muted)', fontSize: 8 }}>{c ? fmtOIChg(c.oiChange) : '—'}</span>
                                                                         <span className={`tsr-strike${isAtm?' atm-s':''}`}>
                                                                             {strike.toLocaleString('en-IN')}
                                                                             {isAtm && <span className="badge atm-b">A</span>}
                                                                             {isMp  && <span className="badge mp-b">P</span>}
                                                                         </span>
+                                                                        <span className="tsr-put tsr-oi-chg" style={{ color: p?.oiChange > 0 ? 'var(--pos)' : p?.oiChange < 0 ? 'var(--neg)' : 'var(--muted)', fontSize: 8 }}>{p ? fmtOIChg(p.oiChange) : '—'}</span>
                                                                         <span className="tsr-put">{p ? (p.oi/1000).toFixed(0) : '—'}</span>
                                                                         <span className="tsr-put">{p ? (p.iv??'—')+'%' : '—'}</span>
                                                                         <span className="tsr-put">{p ? p.lastPrice.toFixed(1) : '—'}</span>
@@ -1732,9 +1793,9 @@ export default function App() {
                                                     </div>
                                                     <div className="chain-wrap">
                                                         <div className="chain-head">
-                                                            <div className="ch-side calls-head"><span>OI(K)</span><span>IV%</span><span>LTP</span><span className="bar-col">Bar</span></div>
+                                                            <div className="ch-side calls-head"><span>Δ</span><span>OI(K)</span><span>IV%</span><span>LTP</span><span className="bar-col">Bar</span></div>
                                                             <div className="ch-strike-head">STRIKE</div>
-                                                            <div className="ch-side puts-head"><span className="bar-col">Bar</span><span>LTP</span><span>IV%</span><span>OI(K)</span></div>
+                                                            <div className="ch-side puts-head"><span className="bar-col">Bar</span><span>LTP</span><span>IV%</span><span>OI(K)</span><span>Δ</span></div>
                                                         </div>
                                                         <div className="chain-body">
                                                             {allStrikes.map(strike => {
@@ -1745,6 +1806,7 @@ export default function App() {
                                                                     <div key={strike} className={`chain-row${isAtm ? ' atm' : ''}${isMp ? ' mp' : ''}`}>
                                                                         <div className={`cr-side cr-call${call?.inTheMoney ? ' itm' : ''}`}>
                                                                             {call ? <>
+                                                                                <span className="ch-delta">{call.delta != null ? call.delta.toFixed(2) : '—'}</span>
                                                                                 <span className="ch-oi">{(call.oi / 1000).toFixed(0)}K</span>
                                                                                 <span className="ch-iv">{call.iv != null ? call.iv + '%' : '—'}</span>
                                                                                 <span className="ch-ltp">{call.lastPrice.toFixed(1)}</span>
@@ -1764,6 +1826,7 @@ export default function App() {
                                                                                 <span className="ch-ltp">{put.lastPrice.toFixed(1)}</span>
                                                                                 <span className="ch-iv">{put.iv != null ? put.iv + '%' : '—'}</span>
                                                                                 <span className="ch-oi">{(put.oi / 1000).toFixed(0)}K</span>
+                                                                                <span className="ch-delta">{put.delta != null ? put.delta.toFixed(2) : '—'}</span>
                                                                             </> : <span className="ch-null">—</span>}
                                                                         </div>
                                                                     </div>
@@ -1966,7 +2029,9 @@ export default function App() {
                 )}
 
                 {/* ════ HFT MODEL VIEW ════ */}
-                {activeView === 'hftmodel' && !hftLoggedIn && (
+                {activeView === 'hftmodel' && (
+                <div className="hft-outer-wrap">
+                {!hftLoggedIn && (
                     <div className="hft-login-wrap">
                         <div className="hft-login-box">
                             <div className="hft-login-icon">◈</div>
@@ -1998,7 +2063,7 @@ export default function App() {
                         </div>
                     </div>
                 )}
-                {activeView === 'hftmodel' && hftLoggedIn && (() => {
+                {hftLoggedIn && (() => {
                     const closedTrades = trades.filter(t => t.exit && t.exit !== '');
                     const pnlList = closedTrades.map(t => {
                         const mult = t.direction === 'LONG' ? 1 : -1;
@@ -2067,6 +2132,7 @@ export default function App() {
                                 </div>
                             </div>
 
+                            <div className="hft-tab-body">
                             {/* DASHBOARD TAB */}
                             {hftTab === 'dashboard' && (
                                 <div className="hft-dashboard">
@@ -2274,6 +2340,9 @@ export default function App() {
                             {/* JOURNAL TAB */}
                             {hftTab === 'journal' && (
                                 <div className="hft-journal">
+                                    {/* ── Risk Calculator ── */}
+                                    <RiskCalc />
+
                                     <div className="hft-add-form">
                                         <div className="hft-form-hdr">✎ LOG TRADE</div>
                                         <div className="hft-form-grid">
@@ -2399,6 +2468,14 @@ export default function App() {
                                             <div className="pm-live-chip">NIFTY <span style={{ color: niftyChange >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{niftyPrice?.toLocaleString('en-IN')} ({niftyChange >= 0 ? '+' : ''}{niftyChange?.toFixed(2)}%)</span></div>
                                             <div className="pm-live-chip">VIX <span style={{ color: vix < 15 ? 'var(--pos)' : vix < 20 ? 'var(--warn)' : 'var(--neg)' }}>{vix?.toFixed(1)}</span></div>
                                             <div className="pm-live-chip">BANK <span style={{ color: pm.bankChange >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{pm.bankNifty?.toLocaleString('en-IN')}</span></div>
+                                            {L2.options?.pcr != null && (
+                                                <div className="pm-live-chip pm-pcr-chip">
+                                                    PCR&nbsp;<span style={{ color: L2.options.pcr > 1.2 ? 'var(--pos)' : L2.options.pcr < 0.8 ? 'var(--neg)' : 'var(--warn)', fontWeight: 900 }}>{L2.options.pcr}</span>
+                                                    <span className="pm-pcr-tag" style={{ background: L2.options.pcr > 1.2 ? 'rgba(16,185,129,0.15)' : L2.options.pcr < 0.8 ? 'rgba(239,68,68,0.15)' : 'rgba(234,179,8,0.15)', color: L2.options.pcr > 1.2 ? 'var(--pos)' : L2.options.pcr < 0.8 ? 'var(--neg)' : 'var(--warn)' }}>
+                                                        {L2.options.pcr > 1.2 ? 'BULLISH' : L2.options.pcr < 0.8 ? 'BEARISH' : 'NEUTRAL'}
+                                                    </span>
+                                                </div>
+                                            )}
                                             <div className="pm-live-chip" style={{ marginLeft: 'auto' }}>
                                                 <span style={{ color: pm.isMarketHours ? 'var(--pos)' : 'var(--warn)' }}>
                                                     {pm.isMarketHours ? '● MARKET OPEN' : '○ MARKET CLOSED'}
@@ -2518,6 +2595,97 @@ export default function App() {
                                                 })}
                                             </div>
                                         </div>
+
+                                        {/* ── TRADE SUGGESTIONS ── */}
+                                        {pm.tradeSuggestions?.length > 0 && (() => {
+                                            const confColor = c => c === 'HIGH' ? 'var(--pos)' : c === 'MEDIUM' ? 'var(--warn)' : 'var(--neg)';
+                                            const confBg    = c => c === 'HIGH' ? 'rgba(16,185,129,0.12)' : c === 'MEDIUM' ? 'rgba(234,179,8,0.1)' : 'rgba(239,68,68,0.08)';
+                                            const typeBg    = t => t === 'CE' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+                                            const typeCol   = t => t === 'CE' ? 'var(--pos)' : 'var(--neg)';
+                                            return (
+                                            <div className="pm-trades-section">
+                                                <div className="pm-trades-hdr">
+                                                    <span>⚡ INDEX F&O TRADE SETUPS</span>
+                                                    <span className="pm-trades-count">{pm.tradeSuggestions.length} setups · based on live data</span>
+                                                </div>
+                                                <div className="pm-macd-row">
+                                                    <span className="pm-macd-chip">NIFTY MACD&nbsp;
+                                                        <strong style={{ color: pm.macd?.cross?.includes('BULL') ? 'var(--pos)' : pm.macd?.cross?.includes('BEAR') ? 'var(--neg)' : 'var(--muted)' }}>
+                                                            {pm.macd?.cross || '—'}
+                                                        </strong>
+                                                        {pm.macd?.histogram != null && <span style={{ color: 'var(--muted)', fontSize: 9 }}> hist {pm.macd.histogram > 0 ? '+' : ''}{pm.macd.histogram}</span>}
+                                                    </span>
+                                                    <span className="pm-macd-chip">BANK EMA&nbsp;<strong style={{ color: pm.bankNiftyIndicators?.ema === 'BULL' ? 'var(--pos)' : 'var(--neg)' }}>{pm.bankNiftyIndicators?.ema || '—'}</strong></span>
+                                                    <span className="pm-macd-chip">BANK RSI&nbsp;<strong style={{ color: (pm.bankNiftyIndicators?.rsi||50) > 60 ? 'var(--pos)' : (pm.bankNiftyIndicators?.rsi||50) < 40 ? 'var(--neg)' : 'var(--warn)' }}>{pm.bankNiftyIndicators?.rsi || '—'}</strong></span>
+                                                    {pm.levels?.swingHigh && <span className="pm-macd-chip">R&nbsp;<strong style={{ color: 'var(--neg)' }}>₹{pm.levels.swingHigh.toFixed(0)}</strong></span>}
+                                                    {pm.levels?.swingLow  && <span className="pm-macd-chip">S&nbsp;<strong style={{ color: 'var(--pos)' }}>₹{pm.levels.swingLow.toFixed(0)}</strong></span>}
+                                                </div>
+                                                <div className="pm-trade-cards">
+                                                    {pm.tradeSuggestions.map(t => (
+                                                        <div key={t.id} className="pm-trade-card" style={{ borderColor: t.type === 'CE' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)' }}>
+                                                            <div className="pm-tc-top">
+                                                                <div className="pm-tc-badges">
+                                                                    <span className="pm-tc-inst">{t.instrument}</span>
+                                                                    <span className="pm-tc-type" style={{ background: typeBg(t.type), color: typeCol(t.type) }}>{t.type}</span>
+                                                                    <span className="pm-tc-strike">₹{t.strike?.toLocaleString('en-IN')}</span>
+                                                                    <span className="pm-tc-conf" style={{ background: confBg(t.confidence), color: confColor(t.confidence) }}>{t.confidence}</span>
+                                                                </div>
+                                                                <div className="pm-tc-tags">
+                                                                    {t.tags.map(tag => <span key={tag} className="pm-tc-tag">{tag}</span>)}
+                                                                </div>
+                                                            </div>
+                                                            <div className="pm-tc-setup">{t.setup}</div>
+                                                            <div className="pm-tc-levels">
+                                                                <div className="pm-tc-level pm-tc-entry">
+                                                                    <span className="pm-tcl-lbl">ENTRY</span>
+                                                                    <span className="pm-tcl-val">{t.entry}</span>
+                                                                </div>
+                                                                <div className="pm-tc-level pm-tc-tgt">
+                                                                    <span className="pm-tcl-lbl">TARGET</span>
+                                                                    <span className="pm-tcl-val" style={{ color: 'var(--pos)' }}>▲ {t.target}</span>
+                                                                </div>
+                                                                <div className="pm-tc-level pm-tc-sl">
+                                                                    <span className="pm-tcl-lbl">STOP LOSS</span>
+                                                                    <span className="pm-tcl-val" style={{ color: 'var(--neg)' }}>▼ {t.stopLoss}</span>
+                                                                </div>
+                                                                <div className="pm-tc-level">
+                                                                    <span className="pm-tcl-lbl">R:R</span>
+                                                                    <span className="pm-tcl-val" style={{ color: 'var(--accent)' }}>{t.riskReward}</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="pm-tc-logic">{t.logic}</div>
+                                                            <div className="pm-tc-disclaimer">⚠ Algorithmic signal only. Not SEBI advice. Verify with your broker before trading.</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            );
+                                        })()}
+
+                                        {/* ── X EXPERT SIGNALS ── */}
+                                        {pm.xExperts?.length > 0 && (
+                                            <div className="pm-x-section">
+                                                <div className="pm-x-hdr">
+                                                    <span className="pm-x-icon">𝕏</span>
+                                                    VERIFIED MARKET EXPERTS ON X
+                                                    <span className="pm-x-sub">Tap to open their latest calls</span>
+                                                </div>
+                                                <div className="pm-x-grid">
+                                                    {pm.xExperts.map(e => (
+                                                        <a key={e.handle} href={e.url} target="_blank" rel="noopener noreferrer" className={`pm-x-card pm-x-${e.type}`}>
+                                                            <div className="pm-xc-top">
+                                                                <span className="pm-xc-handle">@{e.handle}</span>
+                                                                <span className={`pm-xc-badge pm-xb-${e.type}`}>{e.type.toUpperCase()}</span>
+                                                            </div>
+                                                            <div className="pm-xc-name">{e.name}</div>
+                                                            <div className="pm-xc-org">{e.org}</div>
+                                                            <div className="pm-xc-cta">View latest calls →</div>
+                                                        </a>
+                                                    ))}
+                                                </div>
+                                                <div className="pm-x-note">⚠ External signals are unverified opinions. Cross-check with your own model before trading.</div>
+                                            </div>
+                                        )}
                                         </>
                                         );
                                     })()}
@@ -2686,9 +2854,12 @@ export default function App() {
                                     })()}
                                 </div>
                             )}
+                            </div>{/* /hft-tab-body */}
                         </div>
                     );
                 })()}
+                </div>
+                )}
 
             </div>{/* /geo-main */}
 
