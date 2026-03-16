@@ -114,6 +114,75 @@ const dIndiaImpact = (t) => {
     return 'neutral';
 };
 
+// ── Backtest Indicator Library ────────────────────────────────────────────────
+function btEMA(arr, period) {
+    const k = 2 / (period + 1);
+    const out = [];
+    let prev = null;
+    for (const v of arr) {
+        if (v == null) { out.push(null); continue; }
+        if (prev === null) { prev = v; out.push(v); continue; }
+        prev = v * k + prev * (1 - k);
+        out.push(+prev.toFixed(4));
+    }
+    return out;
+}
+function btMACD(closes) {
+    const e12 = btEMA(closes, 12);
+    const e26 = btEMA(closes, 26);
+    const line = e12.map((v, i) => (v != null && e26[i] != null) ? v - e26[i] : null);
+    const sig  = btEMA(line, 9);
+    return line.map((v, i) => (v != null && sig[i] != null) ? +(v - sig[i]).toFixed(4) : null);
+}
+function btRSI(closes, period = 14) {
+    const out = new Array(period).fill(null);
+    if (closes.length <= period) return out;
+    let avgG = 0, avgL = 0;
+    for (let i = 1; i <= period; i++) {
+        const d = closes[i] - closes[i - 1];
+        if (d > 0) avgG += d; else avgL -= d;
+    }
+    avgG /= period; avgL /= period;
+    out.push(avgL === 0 ? 100 : +(100 - 100 / (1 + avgG / avgL)).toFixed(2));
+    for (let i = period + 1; i < closes.length; i++) {
+        const d = closes[i] - closes[i - 1];
+        avgG = (avgG * (period - 1) + Math.max(d, 0)) / period;
+        avgL = (avgL * (period - 1) + Math.max(-d, 0)) / period;
+        out.push(avgL === 0 ? 100 : +(100 - 100 / (1 + avgG / avgL)).toFixed(2));
+    }
+    return out;
+}
+function btATR(bars, period = 14) {
+    const tr = [bars[0].high - bars[0].low];
+    for (let i = 1; i < bars.length; i++) {
+        const pc = bars[i - 1].close;
+        tr.push(Math.max(bars[i].high - bars[i].low, Math.abs(bars[i].high - pc), Math.abs(bars[i].low - pc)));
+    }
+    const out = new Array(period - 1).fill(null);
+    let a = tr.slice(0, period).reduce((s, v) => s + v, 0) / period;
+    out.push(+a.toFixed(2));
+    for (let i = period; i < tr.length; i++) {
+        a = (a * (period - 1) + tr[i]) / period;
+        out.push(+a.toFixed(2));
+    }
+    return out;
+}
+function btVWAP(bars) {
+    // Group by calendar date (IST), compute cumulative VWAP within each session
+    const result = new Array(bars.length).fill(null);
+    let cumTPV = 0, cumV = 0, prevDay = null;
+    for (let i = 0; i < bars.length; i++) {
+        const d = new Date(bars[i].date);
+        const ist = new Date(d.getTime() + 5.5 * 3600000);
+        const day = ist.toISOString().slice(0, 10);
+        if (day !== prevDay) { cumTPV = 0; cumV = 0; prevDay = day; }
+        const tp = (bars[i].high + bars[i].low + bars[i].close) / 3;
+        const vol = bars[i].volume || 1;
+        cumTPV += tp * vol; cumV += vol;
+        result[i] = +(cumTPV / cumV).toFixed(2);
+    }
+    return result;
+}
 // ── Black-Scholes & Indian F&O ──
 const isIndianTicker = (t) => /\.(NS|BO)$/i.test(t) || ['^NSEI', '^NSEBANK', '^BSESN'].includes(t);
 
@@ -2593,9 +2662,212 @@ app.get('/api/personal-model', async (_req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Serve React build in production
+// ── BACKTEST ENGINE ───────────────────────────────────────────────────────────
+app.get('/api/backtest', async (req, res) => {
+    try {
+        const { strategy = 'vwap-trend', period = '1y', interval = '1h' } = req.query;
+
+        // ── 1. Fetch NIFTY historical data ────────────────────────────────────
+        const p1 = new Date();
+        const months = period === '2y' ? 24 : period === '6m' ? 6 : 12;
+        p1.setMonth(p1.getMonth() - months);
+
+        // Yahoo Finance: 1h gives ~730 days, 1d gives full history
+        const useHourly = interval !== '1d';
+        const raw = await yahooFinance.chart('^NSEI', {
+            interval: useHourly ? '1h' : '1d',
+            period1: p1,
+        }).catch(() => null);
+
+        let quotes = (raw?.quotes || []).filter(q => q && q.close != null && q.high != null && q.low != null);
+        if (quotes.length < 60) return res.status(400).json({ error: 'Not enough historical data from Yahoo Finance. Try a shorter period or daily interval.' });
+
+        // ── 2. Compute indicators ─────────────────────────────────────────────
+        const closes  = quotes.map(q => q.close);
+        const ema9    = btEMA(closes, 9);
+        const ema21   = btEMA(closes, 21);
+        const macdH   = btMACD(closes);
+        const rsiArr  = btRSI(closes, 14);
+        const atrArr  = btATR(quotes, 14);
+        const vwapArr = useHourly ? btVWAP(quotes) : closes.map(() => null); // VWAP only for intraday
+
+        // ── 3. Signal logic ────────────────────────────────────────────────────
+        // Returns 'LONG' | 'SHORT' | null for each bar
+        function getSignal(i) {
+            const e9 = ema9[i], e21 = ema21[i], m = macdH[i], r = rsiArr[i], a = atrArr[i], v = vwapArr[i];
+            if (e9 == null || e21 == null || m == null || r == null || a == null) return null;
+            const emaBull = e9 > e21, emaBear = e9 < e21;
+            const aboveVwap = v != null ? closes[i] > v : emaBull;
+            const belowVwap = v != null ? closes[i] < v : emaBear;
+
+            if (strategy === 'vwap-trend') {
+                // Buy: EMA bull + MACD hist positive + RSI healthy + above VWAP
+                if (emaBull && m > 0 && r > 45 && r < 70 && aboveVwap) return 'LONG';
+                if (emaBear && m < 0 && r < 55 && r > 30 && belowVwap) return 'SHORT';
+            } else if (strategy === 'macd-cross') {
+                // Fresh MACD cross only
+                const pm = macdH[i - 1];
+                if (pm != null && pm <= 0 && m > 0 && emaBull && r > 40) return 'LONG';
+                if (pm != null && pm >= 0 && m < 0 && emaBear && r < 60) return 'SHORT';
+            } else if (strategy === 'ema-cross') {
+                // Fresh EMA crossover
+                const pe9 = ema9[i - 1], pe21 = ema21[i - 1];
+                if (pe9 != null && pe21 != null) {
+                    if (pe9 <= pe21 && e9 > e21 && r > 45 && r < 70) return 'LONG';
+                    if (pe9 >= pe21 && e9 < e21 && r < 55 && r > 30) return 'SHORT';
+                }
+            } else if (strategy === 'rsi-reversal') {
+                // Oversold bounce / overbought reversal
+                const pr = rsiArr[i - 1];
+                if (pr != null && pr < 32 && r >= 32 && emaBull) return 'LONG';
+                if (pr != null && pr > 68 && r <= 68 && emaBear) return 'SHORT';
+            }
+            return null;
+        }
+
+        // ── 4. Simulate trades ────────────────────────────────────────────────
+        const LOT = 50; // NIFTY lot size
+        const trades = [];
+        let inTrade = null;
+        let equity = 0;
+        const equityCurve = [{ date: quotes[0].date, equity: 0 }];
+        const monthlyPnl = {};
+
+        // Helper: get IST date string
+        const istDay = (d) => new Date(new Date(d).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+
+        for (let i = 26; i < quotes.length; i++) {
+            const bar = quotes[i];
+
+            // ── Check exit for open trade ──
+            if (inTrade) {
+                const { direction, entry, target, sl, entryDate } = inTrade;
+                let exitPrice = null, exitReason = null;
+
+                if (direction === 'LONG') {
+                    if (bar.high >= target)  { exitPrice = target; exitReason = 'TARGET'; }
+                    else if (bar.low <= sl)  { exitPrice = sl;     exitReason = 'SL';     }
+                } else {
+                    if (bar.low <= target)   { exitPrice = target; exitReason = 'TARGET'; }
+                    else if (bar.high >= sl) { exitPrice = sl;     exitReason = 'SL';     }
+                }
+
+                // EOD exit: close trade on first bar of next session
+                if (!exitPrice && useHourly && istDay(bar.date) !== istDay(entryDate)) {
+                    exitPrice = bar.open || bar.close;
+                    exitReason = 'EOD';
+                }
+                // Daily: max hold 3 bars
+                if (!exitPrice && !useHourly && i - inTrade.entryIdx >= 3) {
+                    exitPrice = bar.close;
+                    exitReason = 'TIME';
+                }
+
+                if (exitPrice) {
+                    const pnlPts = direction === 'LONG' ? exitPrice - entry : entry - exitPrice;
+                    const pnlRs  = +(pnlPts * LOT).toFixed(0);
+                    equity += pnlRs;
+                    const mk = new Date(bar.date).toISOString().slice(0, 7);
+                    monthlyPnl[mk] = (monthlyPnl[mk] || 0) + pnlRs;
+                    trades.push({
+                        date: new Date(entryDate).toISOString().slice(0, 10),
+                        exitDate: new Date(bar.date).toISOString().slice(0, 10),
+                        direction,
+                        entry: +entry.toFixed(2),
+                        exit: +exitPrice.toFixed(2),
+                        target: +target.toFixed(2),
+                        sl: +sl.toFixed(2),
+                        pnlPts: +pnlPts.toFixed(2),
+                        pnlRs,
+                        reason: exitReason,
+                        signal: strategy,
+                    });
+                    equityCurve.push({ date: bar.date, equity: +equity.toFixed(0) });
+                    inTrade = null;
+                }
+            }
+
+            // ── Check entry ──
+            if (!inTrade) {
+                const sig = getSignal(i);
+                if (sig) {
+                    const a = atrArr[i];
+                    const ep = bar.close;
+                    inTrade = {
+                        direction: sig,
+                        entry: ep,
+                        target: sig === 'LONG' ? ep + a * 1.5 : ep - a * 1.5,
+                        sl:     sig === 'LONG' ? ep - a       : ep + a,
+                        entryDate: bar.date,
+                        entryIdx: i,
+                    };
+                }
+            }
+        }
+
+        // ── 5. Statistics ─────────────────────────────────────────────────────
+        const wins   = trades.filter(t => t.pnlRs > 0);
+        const losses = trades.filter(t => t.pnlRs <= 0);
+        const totalTrades = trades.length;
+        const winRate = totalTrades ? +(wins.length / totalTrades * 100).toFixed(1) : 0;
+        const avgWinPts  = wins.length   ? +(wins.reduce((s, t) => s + t.pnlPts, 0) / wins.length).toFixed(1)   : 0;
+        const avgLossPts = losses.length ? +(losses.reduce((s, t) => s + t.pnlPts, 0) / losses.length).toFixed(1) : 0;
+        const totalPnlPts = +trades.reduce((s, t) => s + t.pnlPts, 0).toFixed(1);
+        const totalPnlRs  = +equity.toFixed(0);
+        const profitFactor = losses.length && losses.reduce((s,t)=>s+Math.abs(t.pnlRs),0) > 0
+            ? +(wins.reduce((s,t)=>s+t.pnlRs,0) / Math.abs(losses.reduce((s,t)=>s+t.pnlRs,0))).toFixed(2) : null;
+
+        // Max drawdown
+        let peak = 0, maxDD = 0, runEq = 0;
+        for (const t of trades) {
+            runEq += t.pnlRs;
+            if (runEq > peak) peak = runEq;
+            const dd = peak - runEq;
+            if (dd > maxDD) maxDD = dd;
+        }
+
+        // Annualised Sharpe (monthly returns)
+        const mReturns = Object.values(monthlyPnl);
+        const mMean = mReturns.length ? mReturns.reduce((s,v) => s+v, 0) / mReturns.length : 0;
+        const mStd  = mReturns.length > 1
+            ? Math.sqrt(mReturns.reduce((s,v) => s + Math.pow(v - mMean, 2), 0) / (mReturns.length - 1)) : 0;
+        const sharpe = mStd > 0 ? +(mMean / mStd * Math.sqrt(12)).toFixed(2) : null;
+
+        // Max consecutive wins/losses
+        let curW = 0, curL = 0, maxW = 0, maxL = 0;
+        for (const t of trades) {
+            if (t.pnlRs > 0) { curW++; curL = 0; maxW = Math.max(maxW, curW); }
+            else              { curL++; curW = 0; maxL = Math.max(maxL, curL); }
+        }
+
+        // Exit reason breakdown
+        const exitReasons = trades.reduce((acc, t) => { acc[t.reason] = (acc[t.reason]||0) + 1; return acc; }, {});
+
+        res.json({
+            stats: {
+                totalTrades, winRate,
+                avgWinPts, avgLossPts,
+                totalPnlPts, totalPnlRs,
+                maxDrawdown: +maxDD.toFixed(0),
+                profitFactor, sharpe,
+                maxConsecWins: maxW, maxConsecLosses: maxL,
+                exitReasons,
+                period, strategy, interval: useHourly ? '1h' : '1d',
+                dataPoints: quotes.length,
+            },
+            trades: trades.slice(-200), // last 200
+            equityCurve,
+            monthlyPnl: Object.entries(monthlyPnl)
+                .sort(([a],[b]) => a.localeCompare(b))
+                .map(([month, pnl]) => ({ month, pnl: +pnl.toFixed(0) })),
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Serve React build in production (catch-all MUST be after all API routes)
 if (process.env.NODE_ENV === 'production') {
-    // Cache static assets for 7 days (hashed filenames change on rebuild)
     app.use(express.static(path.join(__dirname, 'dist'), {
         maxAge: '7d',
         immutable: true,

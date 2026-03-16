@@ -414,6 +414,11 @@ export default function App() {
     // Personal Model
     const [pmData, setPmData] = useState(null);
     const [pmLoading, setPmLoading] = useState(false);
+    // Backtest
+    const [btParams, setBtParams] = useState({ strategy: 'vwap-trend', period: '1y', interval: '1h' });
+    const [btResult, setBtResult] = useState(null);
+    const [btLoading, setBtLoading] = useState(false);
+    const [btError, setBtError] = useState(null);
 
     // Alerts
     const [alerts, setAlerts] = useState(() => {
@@ -587,6 +592,16 @@ export default function App() {
             const r = await fetch(`${API}/personal-model`).then(x => x.json());
             setPmData(r);
         } catch {} finally { setPmLoading(false); }
+    }, []);
+
+    const runBacktest = useCallback(async (params) => {
+        setBtLoading(true); setBtError(null); setBtResult(null);
+        try {
+            const qs = new URLSearchParams(params).toString();
+            const r = await fetch(`${API}/backtest?${qs}`).then(x => x.json());
+            if (r.error) { setBtError(r.error); } else { setBtResult(r); }
+        } catch (e) { setBtError(e.message); }
+        finally { setBtLoading(false); }
     }, []);
 
     const fetchSuggestions = useCallback((q) => {
@@ -2125,8 +2140,8 @@ export default function App() {
                                     </form>
                                 </div>
                                 <div className="hft-tabs">
-                                    {[['dashboard','⊞ DASHBOARD'],['signals','⊿ SIGNALS'],['mymodel','◎ MY MODEL'],['fo','⚡ F&O MODEL'],['journal','✎ JOURNAL'],['patterns','◉ PATTERNS']].map(([tab,label]) => (
-                                        <button key={tab} className={`hft-tab-btn${hftTab === tab ? ' active' : ''}${tab === 'fo' ? ' hft-fo-tab' : ''}${tab === 'mymodel' ? ' hft-pm-tab' : ''}`} onClick={() => { setHftTab(tab); if (tab === 'signals') fetchHFT(hftTicker); if (tab === 'fo') fetchFO(); if (tab === 'mymodel') fetchPM(); }}>{label}</button>
+                                    {[['dashboard','⊞ DASHBOARD'],['signals','⊿ SIGNALS'],['mymodel','◎ MY MODEL'],['fo','⚡ F&O MODEL'],['journal','✎ JOURNAL'],['patterns','◉ PATTERNS'],['backtest','⟳ BACKTEST']].map(([tab,label]) => (
+                                        <button key={tab} className={`hft-tab-btn${hftTab === tab ? ' active' : ''}${tab === 'fo' ? ' hft-fo-tab' : ''}${tab === 'mymodel' ? ' hft-pm-tab' : ''}${tab === 'backtest' ? ' hft-bt-tab' : ''}`} onClick={() => { setHftTab(tab); if (tab === 'signals') fetchHFT(hftTicker); if (tab === 'fo') fetchFO(); if (tab === 'mymodel') fetchPM(); }}>{label}</button>
                                     ))}
                                     <button className="hft-logout-btn" onClick={() => { localStorage.removeItem('hft_auth'); setHftLoggedIn(false); }}>⏻ LOGOUT</button>
                                 </div>
@@ -2854,6 +2869,211 @@ export default function App() {
                                     })()}
                                 </div>
                             )}
+                            {/* ── BACKTEST TAB ── */}
+                            {hftTab === 'backtest' && (() => {
+                                const BT_STRATEGIES = [
+                                    { id: 'vwap-trend',   label: 'VWAP Trend',        desc: 'EMA bull + MACD+ + RSI 45–70 + above VWAP' },
+                                    { id: 'macd-cross',   label: 'MACD Cross',         desc: 'Fresh MACD histogram crossover + EMA confirmation' },
+                                    { id: 'ema-cross',    label: 'EMA Crossover',      desc: 'EMA 9 crosses EMA 21 with RSI filter' },
+                                    { id: 'rsi-reversal', label: 'RSI Reversal',       desc: 'Oversold bounce (<32→32) or overbought fade (>68→68)' },
+                                ];
+                                const s = btResult?.stats;
+                                // Equity curve SVG
+                                const curve = btResult?.equityCurve || [];
+                                const monthly = btResult?.monthlyPnl || [];
+                                let curveSvg = null;
+                                if (curve.length > 1) {
+                                    const vals = curve.map(p => p.equity);
+                                    const minV = Math.min(...vals), maxV = Math.max(...vals);
+                                    const range = maxV - minV || 1;
+                                    const W = 600, H = 120, PAD = 6;
+                                    const pts = vals.map((v, i) => {
+                                        const x = PAD + (i / (vals.length - 1)) * (W - PAD * 2);
+                                        const y = H - PAD - ((v - minV) / range) * (H - PAD * 2);
+                                        return `${x.toFixed(1)},${y.toFixed(1)}`;
+                                    }).join(' ');
+                                    const zeroY = H - PAD - ((0 - minV) / range) * (H - PAD * 2);
+                                    const lastEq = vals[vals.length - 1];
+                                    curveSvg = (
+                                        <svg viewBox={`0 0 ${W} ${H}`} className="bt-curve-svg" preserveAspectRatio="none">
+                                            <line x1={PAD} y1={zeroY.toFixed(1)} x2={W-PAD} y2={zeroY.toFixed(1)} stroke="rgba(255,255,255,0.08)" strokeDasharray="4 3" />
+                                            <polyline points={pts} fill="none" stroke={lastEq >= 0 ? '#10b981' : '#ef4444'} strokeWidth="1.8" />
+                                            <polyline points={`${PAD},${H-PAD} ${pts} ${W-PAD},${H-PAD}`} fill={lastEq >= 0 ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'} stroke="none" />
+                                        </svg>
+                                    );
+                                }
+                                // Monthly bar chart
+                                let monthSvg = null;
+                                if (monthly.length > 0) {
+                                    const vals = monthly.map(m => m.pnl);
+                                    const maxAbs = Math.max(...vals.map(Math.abs), 1);
+                                    const W = 600, H = 80, BAR_W = Math.max(4, Math.floor((W - 20) / vals.length) - 2);
+                                    monthSvg = (
+                                        <svg viewBox={`0 0 ${W} ${H}`} className="bt-month-svg" preserveAspectRatio="none">
+                                            <line x1="0" y1={H/2} x2={W} y2={H/2} stroke="rgba(255,255,255,0.08)" />
+                                            {vals.map((v, i) => {
+                                                const barH = Math.max(2, Math.abs(v) / maxAbs * (H/2 - 4));
+                                                const x = 10 + i * ((W - 20) / vals.length);
+                                                const y = v >= 0 ? H/2 - barH : H/2;
+                                                return <rect key={i} x={x} y={y} width={BAR_W} height={barH} fill={v >= 0 ? '#10b981' : '#ef4444'} opacity="0.85" rx="1" />;
+                                            })}
+                                        </svg>
+                                    );
+                                }
+                                return (
+                                <div className="bt-wrap">
+                                    {/* Header */}
+                                    <div className="bt-hdr">
+                                        <div className="bt-title">NIFTY STRATEGY BACKTEST</div>
+                                        <div className="bt-sub">Powered by Yahoo Finance · 1hr candles · NIFTY 50 index</div>
+                                    </div>
+
+                                    {/* Controls */}
+                                    <div className="bt-controls">
+                                        <div className="bt-strategy-grid">
+                                            {BT_STRATEGIES.map(st => (
+                                                <div key={st.id}
+                                                    className={`bt-strat-card${btParams.strategy === st.id ? ' active' : ''}`}
+                                                    onClick={() => setBtParams(p => ({...p, strategy: st.id}))}>
+                                                    <div className="bt-strat-name">{st.label}</div>
+                                                    <div className="bt-strat-desc">{st.desc}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="bt-param-row">
+                                            <div className="bt-param">
+                                                <span className="bt-param-lbl">PERIOD</span>
+                                                <div className="bt-param-btns">
+                                                    {[['6m','6 Months'],['1y','1 Year'],['2y','2 Years']].map(([v,l]) => (
+                                                        <button key={v} className={`bt-pbtn${btParams.period===v?' active':''}`} onClick={() => setBtParams(p=>({...p,period:v}))}>{l}</button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="bt-param">
+                                                <span className="bt-param-lbl">CANDLE</span>
+                                                <div className="bt-param-btns">
+                                                    {[['1h','1 Hour'],['1d','1 Day']].map(([v,l]) => (
+                                                        <button key={v} className={`bt-pBtn${btParams.interval===v?' active':''}`} onClick={() => setBtParams(p=>({...p,interval:v}))}>{l}</button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <button className="bt-run-btn" onClick={() => runBacktest(btParams)} disabled={btLoading}>
+                                                {btLoading ? '⟳ RUNNING...' : '▶ RUN BACKTEST'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {btError && <div className="bt-error">⚠ {btError}</div>}
+
+                                    {!btResult && !btLoading && (
+                                        <div className="bt-empty">
+                                            <div className="bt-empty-icon">⟳</div>
+                                            <div>Select a strategy and press RUN BACKTEST</div>
+                                            <div className="bt-empty-sub">Fetches live NIFTY data · simulates trades · shows P&L, win rate, drawdown</div>
+                                        </div>
+                                    )}
+
+                                    {btLoading && (
+                                        <div className="bt-loading">
+                                            <div className="bt-loading-spinner" />
+                                            <div>Fetching NIFTY data & running simulation...</div>
+                                        </div>
+                                    )}
+
+                                    {btResult && s && (
+                                    <div className="bt-results">
+                                        {/* Stats grid */}
+                                        <div className="bt-stats-grid">
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">TOTAL TRADES</span>
+                                                <span className="bt-stat-val">{s.totalTrades}</span>
+                                                <span className="bt-stat-sub">{s.dataPoints} bars · {s.interval}</span>
+                                            </div>
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">WIN RATE</span>
+                                                <span className="bt-stat-val" style={{ color: s.winRate >= 55 ? 'var(--pos)' : s.winRate >= 45 ? 'var(--warn)' : 'var(--neg)' }}>{s.winRate}%</span>
+                                                <span className="bt-stat-sub">{btResult.trades.filter(t=>t.pnlRs>0).length}W / {btResult.trades.filter(t=>t.pnlRs<=0).length}L</span>
+                                            </div>
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">NET P&L</span>
+                                                <span className="bt-stat-val" style={{ color: s.totalPnlRs >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{s.totalPnlRs >= 0 ? '+' : ''}₹{s.totalPnlRs.toLocaleString('en-IN')}</span>
+                                                <span className="bt-stat-sub">{s.totalPnlPts >= 0 ? '+' : ''}{s.totalPnlPts} NIFTY pts · 1 lot</span>
+                                            </div>
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">AVG WIN</span>
+                                                <span className="bt-stat-val" style={{ color: 'var(--pos)' }}>+{s.avgWinPts} pts</span>
+                                                <span className="bt-stat-sub">+₹{(s.avgWinPts * 50).toFixed(0)} per trade</span>
+                                            </div>
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">AVG LOSS</span>
+                                                <span className="bt-stat-val" style={{ color: 'var(--neg)' }}>{s.avgLossPts} pts</span>
+                                                <span className="bt-stat-sub">₹{(s.avgLossPts * 50).toFixed(0)} per trade</span>
+                                            </div>
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">PROFIT FACTOR</span>
+                                                <span className="bt-stat-val" style={{ color: (s.profitFactor||0) >= 1.5 ? 'var(--pos)' : (s.profitFactor||0) >= 1 ? 'var(--warn)' : 'var(--neg)' }}>{s.profitFactor ?? 'N/A'}</span>
+                                                <span className="bt-stat-sub">Gross profit / gross loss</span>
+                                            </div>
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">MAX DRAWDOWN</span>
+                                                <span className="bt-stat-val" style={{ color: 'var(--neg)' }}>-₹{s.maxDrawdown.toLocaleString('en-IN')}</span>
+                                                <span className="bt-stat-sub">{s.maxConsecLosses} consecutive losses</span>
+                                            </div>
+                                            <div className="bt-stat-card">
+                                                <span className="bt-stat-lbl">SHARPE RATIO</span>
+                                                <span className="bt-stat-val" style={{ color: (s.sharpe||0) >= 1 ? 'var(--pos)' : (s.sharpe||0) >= 0 ? 'var(--warn)' : 'var(--neg)' }}>{s.sharpe ?? 'N/A'}</span>
+                                                <span className="bt-stat-sub">Annualised (monthly returns)</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Exit reason pills */}
+                                        <div className="bt-exit-row">
+                                            {Object.entries(s.exitReasons||{}).map(([r, n]) => (
+                                                <span key={r} className={`bt-exit-pill bt-exit-${r.toLowerCase()}`}>{r}: {n} ({(n/s.totalTrades*100).toFixed(0)}%)</span>
+                                            ))}
+                                        </div>
+
+                                        {/* Equity curve */}
+                                        <div className="bt-chart-block">
+                                            <div className="bt-chart-lbl">EQUITY CURVE <span style={{color:'var(--muted)',fontWeight:400,fontSize:9}}>1 lot ({s.period} · {s.interval})</span></div>
+                                            {curveSvg}
+                                        </div>
+
+                                        {/* Monthly P&L */}
+                                        <div className="bt-chart-block">
+                                            <div className="bt-chart-lbl">MONTHLY P&L</div>
+                                            {monthSvg}
+                                            <div className="bt-month-labels">
+                                                {monthly.filter((_, i) => i % Math.max(1, Math.floor(monthly.length/8)) === 0).map(m => (
+                                                    <span key={m.month} className={m.pnl >= 0 ? 'bt-ml-pos' : 'bt-ml-neg'}>{m.month.slice(5)}<br/>{m.pnl >= 0 ? '+' : ''}₹{(m.pnl/1000).toFixed(1)}k</span>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Trade log */}
+                                        <div className="bt-trade-log">
+                                            <div className="bt-tl-hdr">
+                                                <span>DATE</span><span>DIR</span><span>ENTRY</span><span>EXIT</span>
+                                                <span>PTS</span><span>P&L</span><span>REASON</span>
+                                            </div>
+                                            {[...btResult.trades].reverse().slice(0, 50).map((t, i) => (
+                                                <div key={i} className={`bt-tl-row ${t.pnlRs > 0 ? 'bt-win' : 'bt-loss'}`}>
+                                                    <span>{t.date}</span>
+                                                    <span style={{ color: t.direction === 'LONG' ? 'var(--pos)' : 'var(--neg)', fontWeight: 700 }}>{t.direction === 'LONG' ? '▲ LONG' : '▼ SHORT'}</span>
+                                                    <span>₹{t.entry.toLocaleString('en-IN')}</span>
+                                                    <span>₹{t.exit.toLocaleString('en-IN')}</span>
+                                                    <span style={{ color: t.pnlPts >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{t.pnlPts >= 0 ? '+' : ''}{t.pnlPts}</span>
+                                                    <span style={{ color: t.pnlRs >= 0 ? 'var(--pos)' : 'var(--neg)', fontWeight: 700 }}>{t.pnlRs >= 0 ? '+' : ''}₹{t.pnlRs.toLocaleString('en-IN')}</span>
+                                                    <span className={`bt-reason bt-reason-${t.reason.toLowerCase()}`}>{t.reason}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    )}
+                                </div>
+                                );
+                            })()}
+
                             </div>{/* /hft-tab-body */}
                         </div>
                     );
