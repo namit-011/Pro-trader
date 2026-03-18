@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const compression = require('compression');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -2660,6 +2661,37 @@ app.get('/api/personal-model', async (_req, res) => {
         pmCacheTs = Date.now();
         res.json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── LIVE ALGO TRADES ─────────────────────────────────────────────────────────
+// The Python script (groww_vwap_algo.py) writes algo_trades.json to the project
+// root after every trade exit.  These two endpoints let the dashboard read/write it.
+
+const ALGO_TRADES_FILE = path.join(__dirname, 'algo_trades.json');
+
+// GET  /api/algo-trades  →  return current JSON (or empty scaffold if not yet created)
+app.get('/api/algo-trades', (req, res) => {
+    try {
+        if (fs.existsSync(ALGO_TRADES_FILE)) {
+            const raw = fs.readFileSync(ALGO_TRADES_FILE, 'utf8');
+            res.json(JSON.parse(raw));
+        } else {
+            res.json({ strategy: 'namit-l1', deployment_id: '', trades: [], session_pnl: 0, position: null, updated_at: null });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// POST /api/algo-trades  →  Python script posts a trade/status update here
+app.post('/api/algo-trades', express.json(), (req, res) => {
+    try {
+        const payload = { ...req.body, updated_at: new Date().toISOString() };
+        fs.writeFileSync(ALGO_TRADES_FILE, JSON.stringify(payload, null, 2));
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // ── BACKTEST ENGINE ───────────────────────────────────────────────────────────
