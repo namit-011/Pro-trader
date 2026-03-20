@@ -5,3 +5,14 @@ dist/
 backend_err.txt
 err_msg.txt
 test_output.txt
+
+# ── Local-only algo files (contain live Groww TOTP / API credentials) ──
+# NEVER commit these — credentials are hardcoded inside
+groww_vwap_algo.py
+backtest_vwap.py
+explore_groww.py
+omnisignal_algo.py
+backtest_omnisignal.py
+debugvwap.js
+out.txt
+sample data/
