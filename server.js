@@ -2046,14 +2046,15 @@ app.get('/api/personal-model', async (_req, res) => {
         const mins  = ist.getHours() * 60 + ist.getMinutes();
         const isMarketHours = day >= 1 && day <= 5 && mins >= 555 && mins < 930; // 09:15-15:30 IST
 
-        // Fetch all live data in parallel
-        const [niftyQ, vixQ, bankQ, newsRes, niftyChart, bankChart] = await Promise.all([
+        // Fetch all live data in parallel — bhavcopy PCR included so it doesn't block later
+        const [niftyQ, vixQ, bankQ, newsRes, niftyChart, bankChart, bhavResult] = await Promise.all([
             yahooFinance.quote('^NSEI').catch(() => null),
             yahooFinance.quote('^INDIAVIX').catch(() => null),
             yahooFinance.quote('^NSEBANK').catch(() => null),
             fetch(`http://localhost:${process.env.PORT || 3000}/api/globalnews`).then(r => r.json()).catch(() => []),
             yahooFinance.chart('^NSEI',    { interval: '5m', period1: toPeriod1('5d') }).catch(() => null),
             yahooFinance.chart('^NSEBANK', { interval: '5m', period1: toPeriod1('5d') }).catch(() => null),
+            getLivePCR().catch(() => null),
         ]);
 
         const niftyPrice   = niftyQ?.regularMarketPrice || 0;
@@ -2296,17 +2297,12 @@ app.get('/api/personal-model', async (_req, res) => {
             }
         } catch { /* NSE cookie session failed — fall through to bhavcopy */ }
 
-        // Bhavcopy fallback: NSE FO end-of-day CSV — always accessible, no Akamai block
-        if (pcr === null) {
-            try {
-                const bhav = await getLivePCR();
-                if (bhav.pcr !== null) {
-                    pcr = bhav.pcr;
-                    if (!maxPainStr && bhav.maxPain) maxPainStr = bhav.maxPain;
-                    const tag = `EOD ${bhav.date.slice(0,4)}-${bhav.date.slice(4,6)}-${bhav.date.slice(6,8)}`;
-                    pcrLabel = `PCR ${pcr} (${tag}) — ${pcr > 1.5 ? 'Very Bullish' : pcr > 1.1 ? 'Bullish' : pcr > 0.8 ? 'Neutral' : 'Bearish'}`;
-                }
-            } catch { /* bhavcopy also failed — keep pcrScore neutral */ }
+        // Bhavcopy fallback: already fetched in parallel above — just read bhavResult
+        if (pcr === null && bhavResult?.pcr != null) {
+            pcr = bhavResult.pcr;
+            if (!maxPainStr && bhavResult.maxPain) maxPainStr = bhavResult.maxPain;
+            const tag = `EOD ${bhavResult.date.slice(0,4)}-${bhavResult.date.slice(4,6)}-${bhavResult.date.slice(6,8)}`;
+            pcrLabel = `PCR ${pcr} (${tag}) — ${pcr > 1.5 ? 'Very Bullish' : pcr > 1.1 ? 'Bullish' : pcr > 0.8 ? 'Neutral' : 'Bearish'}`;
         }
 
         // Last resort: persist previous known value across requests
@@ -3067,5 +3063,9 @@ app.listen(PORT, () => {
         fetch(`http://localhost:${PORT}/api/futures`).catch(() => {});
         fetch(`http://localhost:${PORT}/api/indicesbar`).catch(() => {});
         fetch(`http://localhost:${PORT}/api/livetape`).catch(() => {});
+        // Pre-warm bhavcopy PCR (large download — do it once at startup)
+        getLivePCR()
+            .then(d => console.log(`PCR pre-warmed: ${d.pcr} (${d.date})`))
+            .catch(e => console.log(`PCR pre-warm failed: ${e.message}`));
     }, 3000);
 });
