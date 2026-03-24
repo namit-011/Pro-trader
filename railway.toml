@@ -4,6 +4,15 @@ builder = "nixpacks"
 [build.nixpacksPlan.phases.setup]
 nixPkgs = ["nodejs_22"]
 
+[build.nixpacksPlan.phases.install]
+cmds = ["npm ci"]
+
+[build.nixpacksPlan.phases.build]
+cmds = ["npm run build"]
+dependsOn = ["install"]
+
 [deploy]
-startCommand = "node server.js"
+startCommand = "NODE_ENV=production node server.js"
 restartPolicyType = "on_failure"
+healthcheckPath = "/api/indicesbar"
+healthcheckTimeout = 30

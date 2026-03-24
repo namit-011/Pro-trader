@@ -332,6 +332,108 @@ let nseCookieCache = { cookies: '', ts: 0 };
 const NSE_COOKIE_TTL = 4 * 60 * 1000; // 4 min — NSE cookies expire ~5 min
 let lastKnownPCR = { value: null, ts: 0 }; // persist PCR across market-closed periods
 
+// ── NSE FO Bhavcopy PCR (reliable fallback — end-of-day data from NSE archives) ──
+// URL: https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
+// No Akamai/bot-protection on NSE archives CDN — always accessible.
+let bhavPCRCache = { data: null, dateStr: '' };
+
+async function fetchPCRFromBhavcopy() {
+    const zlib = require('zlib');
+
+    // Walk back up to 7 calendar days to find most recent trading day file
+    const tryDate = async (d) => {
+        const ds = d.toISOString().slice(0, 10).replace(/-/g, '');
+        const url = `https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_${ds}_F_0000.csv.zip`;
+        const r = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(25000),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return { buf: Buffer.from(await r.arrayBuffer()), ds };
+    };
+
+    let buf, ds;
+    const base = new Date();
+    for (let i = 1; i <= 7; i++) {
+        const d = new Date(base);
+        d.setDate(d.getDate() - i);
+        if (d.getDay() === 0 || d.getDay() === 6) continue; // skip weekends
+        try { ({ buf, ds } = await tryDate(d)); break; } catch { /* try previous day */ }
+    }
+    if (!buf) throw new Error('No bhavcopy found in last 7 days');
+
+    // Decompress ZIP local file header (PKZIP spec offsets from signature start)
+    const sig = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+    const off = buf.indexOf(sig);
+    const compMethod = buf.readUInt16LE(off + 8);  // offset 8 = compression method (0=stored, 8=deflate)
+    const fnLen = buf.readUInt16LE(off + 26);
+    const exLen = buf.readUInt16LE(off + 28);
+    const compSize = buf.readUInt32LE(off + 18);
+    const dataStart = off + 30 + fnLen + exLen;
+    const compressed = buf.slice(dataStart, dataStart + compSize);
+
+    const csv = await new Promise((res, rej) => {
+        if (compMethod === 0) res(compressed); // stored uncompressed
+        else zlib.inflateRaw(compressed, (e, r) => e ? rej(e) : res(r));
+    });
+
+    const lines = csv.toString('utf8').split('\n');
+    const hdr = lines[0].split(',');
+    const symIdx = hdr.indexOf('TckrSymb');
+    const optIdx = hdr.indexOf('OptnTp');
+    const oiIdx  = hdr.indexOf('OpnIntrst');
+    const strikeIdx = hdr.indexOf('StrkPric');
+    const xpryIdx = hdr.indexOf('XpryDt');
+
+    let ceOI = 0, peOI = 0;
+    const strikeMap = {}; // { strike: { ce: oi, pe: oi } }
+
+    for (let i = 1; i < lines.length; i++) {
+        const c = lines[i].split(',');
+        if (c[symIdx] !== 'NIFTY') continue;
+        const oi     = parseFloat(c[oiIdx]) || 0;
+        const strike = parseFloat(c[strikeIdx]) || 0;
+        const type   = c[optIdx];
+        if (!strikeMap[strike]) strikeMap[strike] = { ce: 0, pe: 0 };
+        if (type === 'CE') { ceOI += oi; strikeMap[strike].ce += oi; }
+        else if (type === 'PE') { peOI += oi; strikeMap[strike].pe += oi; }
+    }
+
+    const pcr = ceOI > 0 ? +(peOI / ceOI).toFixed(2) : null;
+
+    // Max pain: strike that minimises total payout to option buyers
+    const strikes = Object.keys(strikeMap).map(Number).sort((a, b) => a - b);
+    let maxPainStrike = null;
+    if (strikes.length) {
+        let minPain = Infinity;
+        for (const K of strikes) {
+            const pain = strikes.reduce((s, st) =>
+                s + (strikeMap[st].ce || 0) * Math.max(K - st, 0)
+                  + (strikeMap[st].pe || 0) * Math.max(st - K, 0), 0);
+            if (pain < minPain) { minPain = pain; maxPainStrike = K; }
+        }
+    }
+
+    return { pcr, ceOI, peOI, maxPain: maxPainStrike, date: ds, source: 'bhavcopy' };
+}
+
+async function getLivePCR() {
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    // Return cached bhavcopy data if already fetched today
+    if (bhavPCRCache.data && bhavPCRCache.dateStr === todayStr) {
+        return bhavPCRCache.data;
+    }
+    try {
+        const data = await fetchPCRFromBhavcopy();
+        bhavPCRCache = { data, dateStr: todayStr };
+        return data;
+    } catch (e) {
+        // Return stale cache rather than nothing
+        if (bhavPCRCache.data) return bhavPCRCache.data;
+        throw e;
+    }
+}
+
 function parseSetCookies(headers) {
     // headers.get('set-cookie') may return comma-joined or single string
     const raw = headers.get('set-cookie') || '';
@@ -2165,60 +2267,49 @@ app.get('/api/personal-model', async (_req, res) => {
             return totalCallOI > 0 ? +(totalPutOI / totalCallOI).toFixed(2) : null;
         };
 
-        // Fetch NIFTY PCR + Max Pain via proper NSE session (cookie-based)
+        // Fetch NIFTY PCR + Max Pain
+        // Primary: NSE OC API (live, cookie-based) — Akamai may block server-side requests
+        // Reliable fallback: NSE FO Bhavcopy CSV from archives CDN (EOD data, no bot-protection)
         try {
             const nseRes = await fetchNSEOptionChain('NIFTY');
-            // NSE returns totOI in filtered object
             const filtered = nseRes?.filtered || {};
             const ceOI = filtered.CE?.totOI || 0;
             const peOI = filtered.PE?.totOI || 0;
             if (ceOI > 0 && peOI > 0) {
                 pcr = +(peOI / ceOI).toFixed(2);
-            }
-            // Parse option chain rows for max pain
-            const nseData = (nseRes?.records?.data || nseRes?.filtered?.data || []);
-            if (nseData.length) {
-                const strikes = [...new Set(nseData.map(d => d.strikePrice).filter(Boolean))].sort((a, b) => a - b);
-                const ceMap = {}, peMap = {};
-                nseData.forEach(d => {
-                    if (d.CE) ceMap[d.strikePrice] = d.CE.openInterest || 0;
-                    if (d.PE) peMap[d.strikePrice] = d.PE.openInterest || 0;
-                });
-                const mp = strikes.map(K => ({
-                    strike: K,
-                    pain: strikes.reduce((s, st) =>
-                        s + (ceMap[st] || 0) * Math.max(K - st, 0)
-                          + (peMap[st] || 0) * Math.max(st - K, 0), 0),
-                })).sort((a, b) => a.pain - b.pain)[0];
-                if (mp) maxPainStr = mp.strike;
-            }
-            if (pcr !== null) {
+                const nseData = nseRes?.records?.data || [];
+                if (nseData.length) {
+                    const ceMap = {}, peMap = {};
+                    nseData.forEach(d => {
+                        if (d.CE) ceMap[d.strikePrice] = d.CE.openInterest || 0;
+                        if (d.PE) peMap[d.strikePrice] = d.PE.openInterest || 0;
+                    });
+                    const strikes = Object.keys({...ceMap,...peMap}).map(Number).sort((a,b)=>a-b);
+                    const mp = strikes.map(K => ({
+                        strike: K,
+                        pain: strikes.reduce((s, st) =>
+                            s + (ceMap[st]||0)*Math.max(K-st,0) + (peMap[st]||0)*Math.max(st-K,0), 0),
+                    })).sort((a,b)=>a.pain-b.pain)[0];
+                    if (mp) maxPainStr = mp.strike;
+                }
                 pcrLabel = `PCR ${pcr} (NSE live) — ${pcr > 1.5 ? 'Very Bullish' : pcr > 1.1 ? 'Bullish' : pcr > 0.8 ? 'Neutral' : 'Bearish'}`;
             }
-        } catch (e) { /* NSE threw — will try Yahoo below */ }
+        } catch { /* NSE cookie session failed — fall through to bhavcopy */ }
 
-        // Fallback to Yahoo Finance if NSE returned empty data or threw
+        // Bhavcopy fallback: NSE FO end-of-day CSV — always accessible, no Akamai block
         if (pcr === null) {
             try {
-                const yOpts = await yahooFinance.options('^NSEI').catch(() => null);
-                if (yOpts?.options?.[0]) {
-                    const calls = yOpts.options[0].calls || [];
-                    const puts  = yOpts.options[0].puts  || [];
-                    pcr = parsePCRFromChain(calls, puts);
-                    const strikes = [...new Set([...calls, ...puts].map(o => o.strike))].sort((a,b) => a - b);
-                    if (strikes.length) {
-                        const mp = strikes.map(K => ({
-                            strike: K,
-                            pain: calls.reduce((s,c) => s + (c.openInterest||0)*Math.max(K-c.strike,0),0)
-                                + puts.reduce((s,p) => s + (p.openInterest||0)*Math.max(p.strike-K,0),0)
-                        })).sort((a,b) => a.pain - b.pain)[0];
-                        if (!maxPainStr) maxPainStr = mp?.strike ?? null;
-                    }
+                const bhav = await getLivePCR();
+                if (bhav.pcr !== null) {
+                    pcr = bhav.pcr;
+                    if (!maxPainStr && bhav.maxPain) maxPainStr = bhav.maxPain;
+                    const tag = `EOD ${bhav.date.slice(0,4)}-${bhav.date.slice(4,6)}-${bhav.date.slice(6,8)}`;
+                    pcrLabel = `PCR ${pcr} (${tag}) — ${pcr > 1.5 ? 'Very Bullish' : pcr > 1.1 ? 'Bullish' : pcr > 0.8 ? 'Neutral' : 'Bearish'}`;
                 }
-            } catch {}
+            } catch { /* bhavcopy also failed — keep pcrScore neutral */ }
         }
 
-        // Persist live PCR; fall back to last-known when market is closed
+        // Last resort: persist previous known value across requests
         let pcrFromCache = false;
         if (pcr !== null) {
             lastKnownPCR = { value: pcr, ts: Date.now() };
@@ -2228,7 +2319,7 @@ app.get('/api/personal-model', async (_req, res) => {
         }
 
         if (pcr !== null) {
-            const ageNote = pcrFromCache ? ` (last known · ${Math.round((Date.now() - lastKnownPCR.ts) / 60000)}m ago)` : '';
+            const ageNote = pcrFromCache ? ` (cached · ${Math.round((Date.now() - lastKnownPCR.ts) / 60000)}m ago)` : '';
             if (pcr > 1.5)      { pcrScore = 20; pcrLabel = `PCR ${pcr} — Very Bullish (heavy put writing)${ageNote}`; }
             else if (pcr > 1.1) { pcrScore = 16; pcrLabel = `PCR ${pcr} — Bullish${ageNote}`; }
             else if (pcr > 0.8) { pcrScore = 10; pcrLabel = `PCR ${pcr} — Neutral${ageNote}`; }
