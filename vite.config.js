@@ -13,5 +13,25 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-  }
+    // ── Performance optimizations ──
+    target: 'es2020',
+    minify: 'esbuild',
+    cssMinify: true,
+    // Split large vendor chunks for better caching
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'charts': ['lightweight-charts'],
+          'globe': ['globe.gl'],
+        }
+      }
+    },
+    // Increase chunk warning limit (globe.gl is large)
+    chunkSizeWarningLimit: 800,
+  },
+  // Tree-shake more aggressively
+  esbuild: {
+    drop: ['console', 'debugger'],
+  },
 })

@@ -1,7 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "WebSearch",
+      "Bash(node -e \":*)",
+      "Read(//c/Users/DELL/.claude/**)",
+      "Bash(curl -s http://localhost:3000/api/personal-model)",
+      "Bash(curl -s --max-time 15 http://localhost:3000/api/personal-model -o /tmp/pm_result.json)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(netstat -ano)",
+      "Bash(ss -tlnp)",
+      "Bash(curl -s --max-time 25 http://localhost:3000/api/personal-model -o pm_test.json)",
+      "Bash(rm -f pm_test.json)",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(grep -n \"nifty-baseline\\\\|trend-momentum\\\\|id: ''nifty\\\\|id: ''trend\\\\|id: ''vwap\\\\|id: ''macd\\\\|id: ''pcr\\\\|id: ''bank\\\\|addTrade\\\\|_addedIds\" \"c:/Users/DELL/Downloads/Proposal Generator/stock-analyzer-app/server.js\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\DELL\\.claude",
+      "\\tmp"
     ]
   }
 }

@@ -5,15 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover" />
     <title>TerminalX | Bloomberg-Style Market Intelligence</title>
     <meta name="description" content="TerminalX — Bloomberg-style stock terminal with live F&O data, MACD, RSI, options chain, AI signals, and geopolitical risk intelligence.">
+    <meta name="theme-color" content="#060810">
+    <!-- Preconnect to API origin for faster first fetch -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Load fonts with display=swap so text renders immediately -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- DNS prefetch for APIs the app will call -->
+    <link rel="dns-prefetch" href="https://query1.finance.yahoo.com">
+    <link rel="dns-prefetch" href="https://www.nseindia.com">
     <style>
-      html { background: #060810; }
+      /* Critical inline CSS — paint the background instantly to avoid white flash */
+      html, body { background: #060810; margin: 0; }
+      #root { min-height: 100vh; min-height: 100dvh; }
+      /* Skeleton pulse while JS loads */
+      .app-loading {
+        display: flex; align-items: center; justify-content: center;
+        height: 100vh; height: 100dvh;
+        color: #06b6d4; font-family: system-ui, sans-serif; font-size: 14px;
+        letter-spacing: 2px; text-transform: uppercase;
+        animation: lpulse 1.5s ease-in-out infinite;
+      }
+      @keyframes lpulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="app-loading">◈ TerminalX Loading…</div></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -3053,19 +3053,25 @@ if (process.env.NODE_ENV === 'production') {
     });
 }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`TerminalX API Live on ${PORT}`);
-    // Pre-warm caches in background so first user gets fast response
-    setTimeout(() => {
-        fetch(`http://localhost:${PORT}/api/gti`).catch(() => {});
-        fetch(`http://localhost:${PORT}/api/globalnews`).catch(() => {});
-        fetch(`http://localhost:${PORT}/api/futures`).catch(() => {});
-        fetch(`http://localhost:${PORT}/api/indicesbar`).catch(() => {});
-        fetch(`http://localhost:${PORT}/api/livetape`).catch(() => {});
-        // Pre-warm bhavcopy PCR (large download — do it once at startup)
-        getLivePCR()
-            .then(d => console.log(`PCR pre-warmed: ${d.pcr} (${d.date})`))
-            .catch(e => console.log(`PCR pre-warm failed: ${e.message}`));
-    }, 3000);
-});
+// Export app for Vercel serverless (api/index.js imports this)
+module.exports = app;
+
+// Only start HTTP server when running locally (not on Vercel)
+if (!process.env.VERCEL) {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+        console.log(`TerminalX API Live on ${PORT}`);
+        // Pre-warm caches in background so first user gets fast response
+        setTimeout(() => {
+            fetch(`http://localhost:${PORT}/api/gti`).catch(() => {});
+            fetch(`http://localhost:${PORT}/api/globalnews`).catch(() => {});
+            fetch(`http://localhost:${PORT}/api/futures`).catch(() => {});
+            fetch(`http://localhost:${PORT}/api/indicesbar`).catch(() => {});
+            fetch(`http://localhost:${PORT}/api/livetape`).catch(() => {});
+            // Pre-warm bhavcopy PCR (large download — do it once at startup)
+            getLivePCR()
+                .then(d => console.log(`PCR pre-warmed: ${d.pcr} (${d.date})`))
+                .catch(e => console.log(`PCR pre-warm failed: ${e.message}`));
+        }, 3000);
+    });
+}
