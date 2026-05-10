@@ -766,10 +766,12 @@ export default function App() {
             {/* ── HEADER ── */}
             <header className="geo-header">
                 <div className="gh-logo" onClick={() => setActiveView('home')} style={{ cursor: 'pointer' }}>
-                    <div className="gh-logo-icon">◈</div>
+                    <div className="gh-logo-icon" style={{ padding: 0, overflow: 'hidden' }}>
+                        <img src="/logo.png" alt="Astraeus" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
                     <div>
-                        <div className="gh-logo-name">Terminal<span className="gh-acc">X</span></div>
-                        <div className="gh-logo-sub">MARKET INTELLIGENCE · v3.0</div>
+                        <div className="gh-logo-name">ASTRA<span className="gh-acc">EUS</span></div>
+                        <div className="gh-logo-sub">QUANTUM INTELLIGENCE · v4.0</div>
                     </div>
                 </div>
 
