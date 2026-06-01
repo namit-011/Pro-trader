@@ -1439,8 +1439,9 @@ app.post('/api/portfolio/rotation-cost', (req, res) => {
 // ── Test 16: F&O expiry info ─────────────────────────────────────────────────
 app.get('/api/expiry-info', (_req, res) => res.json(getDaysToExpiry()));
 
-// ── Serve React build (production) ───────────────────────────────────────────
-if (process.env.NODE_ENV === 'production') {
+// ── Serve React build (production, non-Vercel only) ──────────────────────────
+// On Vercel the CDN serves dist/ directly; Express must not try to serve it
+if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
     const distDir = path.join(__dirname, '..', 'dist');
     app.use(express.static(distDir, { maxAge: '7d', immutable: true, setHeaders: (res, fp) => { if (fp.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); } }));
     app.use((req, res) => res.sendFile(path.join(distDir, 'index.html')));
