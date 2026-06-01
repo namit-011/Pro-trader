@@ -2,17 +2,19 @@ node_modules/
 dist/
 .env
 *.log
+
+# Debug / scratch files
 backend_err.txt
 err_msg.txt
 test_output.txt
-
-# ── Local-only algo files (contain live Groww TOTP / API credentials) ──
-# NEVER commit these — credentials are hardcoded inside
-groww_vwap_algo.py
-backtest_vwap.py
-explore_groww.py
-omnisignal_algo.py
-backtest_omnisignal.py
-debugvwap.js
 out.txt
+test.js
+test_chart.js
+diag.js
+
+# Local-only algo files (Groww TOTP / API credentials hardcoded — never commit)
+algo/
 sample data/
+
+# algo_trades.json is runtime-generated, not source
+algo_trades.json

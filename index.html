@@ -6,31 +6,57 @@
     <title>Astraeus | Quantum Market Intelligence</title>
     <meta name="description" content="Astraeus — High-performance financial intelligence terminal with live F&O data, predictive AI signals, and global risk analytics.">
     <meta name="theme-color" content="#060810">
-    <!-- Preconnect to API origin for faster first fetch -->
+
+    <!-- Critical inline CSS — zero white flash, instant skeleton -->
+    <style>
+      *,*::before,*::after{box-sizing:border-box}
+      html,body{background:#060810;margin:0;padding:0;color:#e2e8f0;
+        font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+      #root{min-height:100vh;min-height:100dvh}
+      .app-loading{
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:16px;height:100vh;height:100dvh}
+      .app-loading__mark{
+        font-size:28px;color:#06b6d4;
+        animation:spin 3s linear infinite}
+      .app-loading__text{
+        font-size:11px;letter-spacing:3px;text-transform:uppercase;
+        color:#475569;animation:pulse 1.8s ease-in-out infinite}
+      .app-loading__bar{
+        width:140px;height:2px;background:#0f172a;border-radius:1px;overflow:hidden}
+      .app-loading__fill{
+        width:40%;height:100%;background:linear-gradient(90deg,#06b6d4,#3b82f6);
+        border-radius:1px;animation:slide 1.4s ease-in-out infinite}
+      @keyframes spin{to{transform:rotate(360deg)}}
+      @keyframes pulse{0%,100%{opacity:.35}50%{opacity:.9}}
+      @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+    </style>
+
+    <!-- DNS + connection pre-warming for APIs hit on first render -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Load fonts with display=swap so text renders immediately -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-    <!-- DNS prefetch for APIs the app will call -->
     <link rel="dns-prefetch" href="https://query1.finance.yahoo.com">
     <link rel="dns-prefetch" href="https://www.nseindia.com">
-    <style>
-      /* Critical inline CSS — paint the background instantly to avoid white flash */
-      html, body { background: #060810; margin: 0; }
-      #root { min-height: 100vh; min-height: 100dvh; }
-      /* Skeleton pulse while JS loads */
-      .app-loading {
-        display: flex; align-items: center; justify-content: center;
-        height: 100vh; height: 100dvh;
-        color: #06b6d4; font-family: system-ui, sans-serif; font-size: 14px;
-        letter-spacing: 2px; text-transform: uppercase;
-        animation: lpulse 1.5s ease-in-out infinite;
-      }
-      @keyframes lpulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
-    </style>
+    <link rel="dns-prefetch" href="https://nsearchives.nseindia.com">
+    <link rel="dns-prefetch" href="https://appfeeds.moneycontrol.com">
+
+    <!-- Fonts: non-blocking (preload trick — swap to stylesheet after parse) -->
+    <link rel="preload" as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      onload="this.rel='stylesheet'">
+    <noscript>
+      <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+    </noscript>
   </head>
   <body>
-    <div id="root"><div class="app-loading">◈ Astraeus Initializing…</div></div>
+    <div id="root">
+      <div class="app-loading">
+        <div class="app-loading__mark">◈</div>
+        <div class="app-loading__bar"><div class="app-loading__fill"></div></div>
+        <div class="app-loading__text">Astraeus Initializing</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

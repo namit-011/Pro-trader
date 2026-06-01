@@ -3,7 +3,7 @@ builder = "nixpacks"
 buildCommand = "npm ci --include=dev && npm run build"
 
 [deploy]
-startCommand = "NODE_ENV=production node server.js"
+startCommand = "NODE_ENV=production node server/index.js"
 restartPolicyType = "on_failure"
 healthcheckPath = "/api/indicesbar"
 healthcheckTimeout = 60

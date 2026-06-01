@@ -1,18 +1,19 @@
 {
-  "name": "stock-analyzer-app",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "astraeus-market-terminal",
+  "version": "2.0.0",
+  "description": "Astraeus Quantum Market Intelligence Terminal — Indian F&O analytics platform",
+  "main": "server/index.js",
   "scripts": {
     "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
     "frontend": "vite",
-    "backend": "node server.js",
+    "backend": "node server/index.js",
     "build": "vite build",
-    "start": "NODE_ENV=production node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "NODE_ENV=production node server/index.js",
+    "lint": "eslint src server --ext .js,.jsx",
+    "test": "echo \"No tests configured\" && exit 0"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["nifty", "options", "pcr", "india", "trading"],
+  "author": "ProTrader",
   "license": "ISC",
   "type": "commonjs",
   "engines": {

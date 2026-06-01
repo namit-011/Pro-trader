@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useState, useCallback } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
+import AppV2 from './AppV2.jsx'
 import './index.css'
 
 class ErrorBoundary extends React.Component {
@@ -8,23 +9,14 @@ class ErrorBoundary extends React.Component {
         super(props);
         this.state = { hasError: false, error: null, errorInfo: null };
     }
-
-    static getDerivedStateFromError(error) {
-        return { hasError: true };
-    }
-
-    componentDidCatch(error, errorInfo) {
-        this.setState({ error, errorInfo });
-        console.error(error, errorInfo);
-    }
-
+    static getDerivedStateFromError() { return { hasError: true }; }
+    componentDidCatch(error, errorInfo) { this.setState({ error, errorInfo }); }
     render() {
         if (this.state.hasError) {
             return (
-                <div style={{ color: 'red', margin: '20px' }}>
-                    <h1>Something went wrong.</h1>
-                    <pre>{this.state.error && this.state.error.toString()}</pre>
-                    <pre>{this.state.errorInfo && this.state.errorInfo.componentStack}</pre>
+                <div style={{ color: '#ef4444', margin: 20, fontFamily: 'monospace' }}>
+                    <h2>Something went wrong.</h2>
+                    <pre style={{ fontSize: 12, color: '#f87171' }}>{this.state.error?.toString()}</pre>
                 </div>
             );
         }
@@ -32,10 +24,31 @@ class ErrorBoundary extends React.Component {
     }
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-    <React.StrictMode>
+function Root() {
+    const [version, setVersion] = useState(
+        () => localStorage.getItem('astraeus_version') || 'v1'
+    );
+
+    const switchToV2 = useCallback(() => {
+        localStorage.setItem('astraeus_version', 'v2');
+        setVersion('v2');
+    }, []);
+
+    const switchToV1 = useCallback(() => {
+        localStorage.setItem('astraeus_version', 'v1');
+        setVersion('v1');
+    }, []);
+
+    return (
         <ErrorBoundary>
-            <App />
+            {version === 'v2'
+                ? <AppV2 onSwitchToV1={switchToV1} />
+                : <App   onSwitchToV2={switchToV2} />
+            }
         </ErrorBoundary>
-    </React.StrictMode>,
-)
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode><Root /></React.StrictMode>
+);

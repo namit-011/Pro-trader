@@ -1,346 +1,24 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as LightweightCharts from 'lightweight-charts';
+
+import { NSE_YAHOO, nseShortName } from './constants/markets';
+import { fmt, fmtCur }             from './utils/formatters';
+import { gtiColor, gtiLevel, sentColor, sentLabel, actionColor, indiaLabel } from './utils/colors';
+
+import StarField              from './components/StarField';
+import GlobeView              from './components/GlobeView';
+import GTISparkline           from './components/GTISparkline';
+import SignalCard             from './components/SignalCard';
+import GeoTicker              from './components/GeoTicker';
+import Gauge                  from './components/Gauge';
+import CountryModal           from './components/CountryModal';
+import RiskCalc               from './components/RiskCalc';
+import PortfolioIntelligence  from './components/PortfolioIntelligence';
 
 const API = '/api';
 
-// ── Helpers ──
-const fmt = (n, d = 2) => (n != null && !isNaN(n)) ? Number(n).toFixed(d) : 'N/A';
-const fmtCur = (n, c = '₹') => (n != null && !isNaN(n) && n !== 0) ? `${c}${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A';
-
-// GTI helpers
-const gtiColor  = g => g >= 80 ? '#ef4444' : g >= 60 ? '#fb923c' : g >= 35 ? '#3b82f6' : '#22c55e';
-const gtiLevel  = g => g >= 80 ? 'CRITICAL' : g >= 60 ? 'ELEVATED' : g >= 35 ? 'MEDIUM' : 'LOW';
-const dirColor  = d => ({ BUY: '#10b981', SELL: '#ef4444', HOLD: '#eab308' }[d] || '#94a3b8');
-const sentColor = s => ({ bullish: '#10b981', bearish: '#ef4444', neutral: '#94a3b8' }[s] || '#94a3b8');
-const sentLabel = s => ({ bullish: '▲ BULLISH', bearish: '▼ BEARISH', neutral: '→ NEUTRAL' }[s] || '→ NEUTRAL');
-const actionColor = a => ({ 'STRONG BUY': '#10b981', 'BUY': '#10b981', 'HOLD': '#eab308', 'SELL': '#ef4444', 'STRONG SELL': '#b91c1c' }[a] || '#94a3b8');
-const indiaLabel = s => ({ bullish: '▲ India', bearish: '▼ India', neutral: '~ India' }[s] || '~ India');
-
-// NSE index name → Yahoo Finance symbol (for clickable chips)
-const NSE_YAHOO = {
-    'NIFTY 50': '^NSEI', 'NIFTY BANK': '^NSEBANK', 'INDIA VIX': '^INDIAVIX',
-    'S&P BSE SENSEX': '^BSESN', 'NIFTY MIDCAP 100': '^CNXMIDCAP', 'NIFTY SMALLCAP 100': '^CNXSC',
-    'NIFTY IT': '^CNXIT', 'NIFTY AUTO': '^CNXAUTO', 'NIFTY PHARMA': '^CNXPHARMA',
-    'NIFTY FMCG': '^CNXFMCG', 'NIFTY METAL': '^CNXMETAL', 'NIFTY ENERGY': '^CNXENERGY',
-    'NIFTY REALTY': '^CNXREALTY', 'NIFTY FINANCIAL SERVICES': '^NSEBANK',
-    'NIFTY INFRA': '^CNXINFRA', 'NIFTY MEDIA': '^CNXMEDIA',
-};
-const nseShortName = n => n.replace('NIFTY FINANCIAL SERVICES','FINNIFTY').replace('NIFTY MIDCAP 100','MIDCAP').replace('NIFTY SMALLCAP 100','SMALLCAP').replace('S&P BSE SENSEX','SENSEX').replace('NIFTY BANK','BANKNIFTY').replace('NIFTY 50','NIFTY').replace('INDIA VIX','VIX').replace('NIFTY ','');
-
-// Country risk map (ISO_A3 → 0-100)
-const RISK = {
-    PRK: 93, RUS: 88, UKR: 84, IRN: 78, SYR: 80, YEM: 82, AFG: 81, IRQ: 73,
-    ISR: 70, PAK: 67, SDN: 68, MLI: 65, NGA: 61, ETH: 64, SOM: 76, LBY: 70,
-    VEN: 62, MMR: 72, CHN: 44, IND: 33, USA: 28, GBR: 22, FRA: 23, DEU: 20,
-    JPN: 26, AUS: 16, CAN: 17, BRA: 35, MEX: 42, SAU: 55, TUR: 48, EGY: 50,
-    ZAF: 38, IDN: 30, MYS: 25, SGP: 14, KOR: 32, TWN: 58, ARE: 38, QAT: 34,
-    KWT: 45, OMN: 38, BGD: 42, LKA: 50, NPL: 36, KHM: 30, THA: 32, VNM: 28,
-    PHL: 40, ARG: 52, COL: 48, PER: 40, CHL: 30, POL: 28, CZE: 18, HUN: 25,
-    GRC: 26, ITA: 22, ESP: 20, PRT: 16, NOR: 12, SWE: 12, DNK: 12, FIN: 14,
-    NLD: 16, BEL: 16, AUT: 15, CHE: 12, NZL: 13, ZAR: 38,
-};
-const countryColor = iso => {
-    const r = RISK[iso] ?? 22;
-    if (r >= 80) return 'rgba(239,68,68,0.72)';
-    if (r >= 60) return 'rgba(251,146,60,0.65)';
-    if (r >= 35) return 'rgba(59,130,246,0.55)';
-    return 'rgba(34,197,94,0.30)';
-};
-
-// ── StarField ──
-function StarField() {
-    const ref = useRef(null);
-    useEffect(() => {
-        const c = ref.current; if (!c) return;
-        const ctx = c.getContext('2d');
-        const resize = () => { c.width = window.innerWidth; c.height = window.innerHeight; };
-        resize();
-        const stars = Array.from({ length: 220 }, () => ({
-            x: Math.random() * c.width, y: Math.random() * c.height,
-            r: Math.random() * 1.4 + 0.2,
-            o: Math.random() * 0.6 + 0.25,
-            sp: Math.random() * 0.6 + 0.2
-        }));
-        let frame, t = 0;
-        const draw = () => {
-            ctx.clearRect(0, 0, c.width, c.height);
-            t += 0.008;
-            stars.forEach(s => {
-                ctx.beginPath();
-                ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(200,220,255,${s.o * (0.65 + 0.35 * Math.sin(t * s.sp))})`;
-                ctx.fill();
-            });
-            frame = requestAnimationFrame(draw);
-        };
-        draw();
-        window.addEventListener('resize', resize);
-        return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', resize); };
-    }, []);
-    return <canvas ref={ref} className="star-field" />;
-}
-
-// ── Globe ──
-function GlobeView({ onCountryClick }) {
-    const containerRef = useRef(null);
-    const globeRef = useRef(null);
-    const onClickRef = useRef(onCountryClick);
-    onClickRef.current = onCountryClick;
-
-    useEffect(() => {
-        if (!containerRef.current || globeRef.current) return;
-        let g;
-        import('globe.gl').then(mod => {
-            const Globe = mod.default || mod;
-            g = Globe()(containerRef.current)
-                .backgroundColor('rgba(0,0,0,0)')
-                .showAtmosphere(true)
-                .atmosphereColor('rgba(6,182,212,0.45)')
-                .atmosphereAltitude(0.14)
-                .showGraticules(false);
-
-            fetch('https://raw.githubusercontent.com/vasturiano/react-globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson')
-                .then(r => r.json())
-                .then(({ features }) => {
-                    g.polygonsData(features)
-                        .polygonCapColor(f => countryColor(f.properties?.ISO_A3))
-                        .polygonSideColor(() => 'rgba(6,182,212,0.08)')
-                        .polygonStrokeColor(() => 'rgba(6,182,212,0.35)')
-                        .polygonLabel(f => `
-                            <div class="globe-tip">
-                                <strong>${f.properties?.NAME || ''}</strong>
-                                <span>Risk Score: ${RISK[f.properties?.ISO_A3] ?? 'Low'}</span>
-                                <span class="gt-click-hint">Click for market data</span>
-                            </div>`)
-                        .polygonsTransitionDuration(900)
-                        .onPolygonClick((polygon) => {
-                            const iso = polygon?.properties?.ISO_A3;
-                            const name = polygon?.properties?.NAME;
-                            if (iso && onClickRef.current) onClickRef.current(iso, name);
-                        });
-                }).catch(() => {});
-
-            g.controls().autoRotate = true;
-            g.controls().autoRotateSpeed = 0.38;
-            g.controls().enableZoom = false;
-            g.pointOfView({ lat: 22, lng: 55, altitude: 2.1 });
-
-            const fit = () => {
-                if (containerRef.current)
-                    g.width(containerRef.current.clientWidth).height(containerRef.current.clientHeight);
-            };
-            fit(); // set initial size so globe fills container and is centered
-            window.addEventListener('resize', fit);
-            globeRef.current = { globe: g, cleanup: () => window.removeEventListener('resize', fit) };
-        }).catch(() => {});
-
-        return () => { globeRef.current?.cleanup?.(); };
-    }, []);
-
-    return <div ref={containerRef} className="globe-container" />;
-}
-
-// ── GTI Sparkline ──
-function GTISparkline({ history }) {
-    const vals = history.length > 1 ? history : [48, 52, 55, 58, 62, 65];
-    const W = 110, H = 28;
-    const mn = Math.min(...vals) - 3, mx = Math.max(...vals) + 3;
-    const pts = vals.map((v, i) =>
-        `${(i / (vals.length - 1)) * W},${H - ((v - mn) / (mx - mn)) * H}`).join(' ');
-    const last = vals[vals.length - 1];
-    const lx = W, ly = H - ((last - mn) / (mx - mn)) * H;
-    return (
-        <svg width={W} height={H} className="gti-spark">
-            <defs>
-                <linearGradient id="sparkGrad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.3" />
-                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="1" />
-                </linearGradient>
-            </defs>
-            <polyline points={pts} fill="none" stroke="url(#sparkGrad)" strokeWidth="1.8" />
-            <circle cx={lx} cy={ly} r="3.5" fill="#06b6d4" />
-        </svg>
-    );
-}
-
-// ── Signal Card ──
-function SignalCard({ sig, onAnalyze }) {
-    const dc = dirColor(sig.direction);
-    return (
-        <div className="sig-card" onClick={() => onAnalyze(sig.ticker + '.NS')}>
-            <div className="sc-top">
-                <div className="sc-ticker-row">
-                    <span className="sc-sym">{sig.ticker}</span>
-                    <span className="sc-dir-badge" style={{ color: dc, borderColor: dc + '55', background: dc + '18' }}>{sig.direction}</span>
-                </div>
-                <div className="sc-price-col">
-                    <span className="sc-price">₹{sig.price?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                    <span className={`sc-chg ${sig.change >= 0 ? 'pos' : 'neg'}`}>{sig.change >= 0 ? '▲' : '▼'}{Math.abs(sig.change).toFixed(2)}%</span>
-                </div>
-            </div>
-            <div className="sc-name">{sig.name} <span className="sc-cls">· {sig.cls}</span></div>
-            <div className="sc-conf-row">
-                <span className="sc-conf-label">Confidence</span>
-                <div className="sc-conf-track"><div className="sc-conf-fill" style={{ width: `${sig.confidence}%`, background: dc }} /></div>
-                <span className="sc-conf-pct" style={{ color: dc }}>{sig.confidence}%</span>
-            </div>
-            <div className="sc-bars">
-                <div className="sc-bar-row">
-                    <span className="pos">Bull</span>
-                    <div className="sc-track"><div className="sc-fill pos" style={{ width: `${sig.bull}%` }} /></div>
-                    <span className="pos sc-pct">{sig.bull}%</span>
-                </div>
-                <div className="sc-bar-row">
-                    <span className="neg">Bear</span>
-                    <div className="sc-track"><div className="sc-fill neg" style={{ width: `${sig.bear}%` }} /></div>
-                    <span className="neg sc-pct">{sig.bear}%</span>
-                </div>
-            </div>
-            <div className="sc-tags">
-                <span className={`sc-vol vol-${sig.vol?.toLowerCase()}`}>VOL: {sig.vol}</span>
-                {sig.volSurge && <span className="sc-surge">⚡ SURGE</span>}
-                <span className="sc-tag">{sig.timeframe}</span>
-                <span className="sc-tag">RR {sig.rr}</span>
-            </div>
-            <div className="sc-geo">⚡ {sig.geoDriver}</div>
-        </div>
-    );
-}
-
-// ── Geo Event Ticker ──
-function GeoTicker({ events }) {
-    const doubled = [...events, ...events];
-    return (
-        <div className="geo-ticker">
-            <div className="gt-live-badge"><span className="gt-dot" />LIVE</div>
-            <div className="gt-runway">
-                <div className="gt-scroll-track">
-                    {doubled.map((e, i) => (
-                        <a key={i} href={e.link || '#'} target="_blank" rel="noreferrer" className={`gt-event lvl-${(e.level || 'low').toLowerCase()}`}>
-                            <span className={`gt-lvl-dot lvl-${(e.level || 'low').toLowerCase()}`} />
-                            <strong>{e.title}</strong>
-                            <span className="gt-meta">{e.time} · {e.region}</span>
-                            <span className={`gt-badge lvl-${(e.level || 'low').toLowerCase()}`}>{e.level}</span>
-                        </a>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// ── Gauge ──
-function Gauge({ val, label, color }) {
-    const v = parseFloat(val) || 0;
-    const pct = Math.min(100, Math.max(0, v));
-    return (
-        <div className="gauge-wrap">
-            <div className="gauge-arc">
-                <div className="gauge-fill" style={{ '--pct': pct, '--color': color }} />
-                <div className="gauge-center"><span style={{ color }}>{v > 0 ? v.toFixed(1) : '--'}</span></div>
-            </div>
-            <div className="gauge-label">{label}</div>
-        </div>
-    );
-}
-
-// ── Country Modal ──
-function CountryModal({ modal, onClose }) {
-    if (!modal) return null;
-    return (
-        <div className="cm-overlay" onClick={onClose}>
-            <div className="cm-box" onClick={e => e.stopPropagation()}>
-                <div className="cm-head">
-                    <div className="cm-title-block">
-                        <div className="cm-country">{modal.name}</div>
-                        <div className="cm-sub">MARKET INDICES · {modal.iso}</div>
-                    </div>
-                    <button className="cm-close" onClick={onClose}>✕</button>
-                </div>
-                {!modal.data ? (
-                    <div className="cm-loading">⟳ Fetching market data…</div>
-                ) : modal.data.length === 0 ? (
-                    <div className="cm-empty">No index data available for this region</div>
-                ) : (
-                    <div className="cm-list">
-                        {modal.data.map((idx, i) => (
-                            <div key={i} className="cm-row">
-                                <div className="cm-row-left">
-                                    <div className="cm-sym">{idx.symbol}</div>
-                                    <div className="cm-idx-name">{idx.name?.slice(0, 32)}</div>
-                                </div>
-                                <div className="cm-row-right">
-                                    <span className="cm-price">
-                                        {idx.price != null ? idx.price.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}
-                                        {idx.currency && idx.currency !== 'INR' ? ` ${idx.currency}` : ''}
-                                    </span>
-                                    <span className={`cm-chg ${(idx.changePercent || 0) >= 0 ? 'pos' : 'neg'}`}>
-                                        {(idx.changePercent || 0) >= 0 ? '▲' : '▼'}{Math.abs(idx.changePercent || 0).toFixed(2)}%
-                                    </span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-                <div className="cm-footer">⊙ Data via Yahoo Finance · Cached 60s</div>
-            </div>
-        </div>
-    );
-}
-
-// ── Risk Calculator Component ──
-function RiskCalc() {
-    const [rc, setRc] = useState({ capital: '', riskPct: '1', entry: '', sl: '', lotSize: '50' });
-    const cap = parseFloat(rc.capital) || 0;
-    const entry = parseFloat(rc.entry) || 0;
-    const sl = parseFloat(rc.sl) || 0;
-    const riskPct = parseFloat(rc.riskPct) || 1;
-    const lotSize = parseInt(rc.lotSize) || 1;
-    const maxRisk = cap * riskPct / 100;
-    const pointRisk = entry > 0 && sl > 0 ? Math.abs(entry - sl) : 0;
-    const lots = pointRisk > 0 ? Math.floor(maxRisk / (pointRisk * lotSize)) : 0;
-    const actualRisk = lots * pointRisk * lotSize;
-    const rrTarget = entry > 0 && sl > 0 ? entry + 1.5 * (entry - sl) : 0;
-    return (
-        <div className="hft-risk-calc">
-            <div className="hft-form-hdr">⚖ POSITION SIZE CALCULATOR</div>
-            <div className="hft-rc-grid">
-                <div className="hft-form-field">
-                    <label>CAPITAL ₹</label>
-                    <input type="number" value={rc.capital} onChange={e => setRc(r => ({...r, capital: e.target.value}))} placeholder="500000" />
-                </div>
-                <div className="hft-form-field">
-                    <label>RISK %</label>
-                    <input type="number" step="0.1" value={rc.riskPct} onChange={e => setRc(r => ({...r, riskPct: e.target.value}))} placeholder="1" />
-                </div>
-                <div className="hft-form-field">
-                    <label>ENTRY ₹</label>
-                    <input type="number" value={rc.entry} onChange={e => setRc(r => ({...r, entry: e.target.value}))} placeholder="18500" />
-                </div>
-                <div className="hft-form-field">
-                    <label>STOP LOSS ₹</label>
-                    <input type="number" value={rc.sl} onChange={e => setRc(r => ({...r, sl: e.target.value}))} placeholder="18400" />
-                </div>
-                <div className="hft-form-field">
-                    <label>LOT SIZE</label>
-                    <input type="number" value={rc.lotSize} onChange={e => setRc(r => ({...r, lotSize: e.target.value}))} placeholder="50" />
-                </div>
-            </div>
-            {cap > 0 && entry > 0 && sl > 0 && (
-                <div className="hft-rc-result">
-                    <div className="hft-rc-row"><span>MAX RISK</span><strong className="neg">₹{maxRisk.toLocaleString('en-IN', {maximumFractionDigits:0})}</strong></div>
-                    <div className="hft-rc-row"><span>POINT RISK</span><strong className="warn">{pointRisk.toFixed(1)} pts</strong></div>
-                    <div className="hft-rc-row"><span>LOTS TO TRADE</span><strong className="pos">{lots}</strong></div>
-                    <div className="hft-rc-row"><span>ACTUAL RISK</span><strong>₹{actualRisk.toLocaleString('en-IN', {maximumFractionDigits:0})}</strong></div>
-                    <div className="hft-rc-row"><span>1:1.5 TARGET</span><strong className="pos">{rrTarget > 0 ? rrTarget.toFixed(1) : '—'}</strong></div>
-                </div>
-            )}
-        </div>
-    );
-}
-
 // ── App ──
-export default function App() {
+export default function App({ onSwitchToV2 }) {
     // Views: geopulse | terminal | signals
     const [activeView, setActiveView] = useState('home');
 
@@ -790,12 +468,24 @@ export default function App() {
                 </div>
 
                 <nav className="gh-nav">
-                    {[['geopulse', '⊕ EARTH PULSE'], ['terminal', '⊞ TERMINAL'], ['signals', '⊿ AI SIGNALS'], ['hftmodel', '◈ HFT MODEL']].map(([v, l]) => (
+                    {[
+                        ['geopulse',  '⊕ EARTH PULSE'],
+                        ['terminal',  '⊞ TERMINAL'],
+                        ['signals',   '⊿ AI SIGNALS'],
+                        ['hftmodel',  '◈ HFT MODEL'],
+                        ['portfolio', '◈ PORTFOLIO'],
+                    ].map(([v, l]) => (
                         <button key={v} className={`gh-nav-btn${activeView === v ? ' active' : ''}`} onClick={() => setActiveView(v)}>{l}</button>
                     ))}
                 </nav>
 
                 <div className="gh-right">
+                    {onSwitchToV2 && (
+                        <button onClick={onSwitchToV2} style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)', color: '#fff', border: 'none', borderRadius: 7, padding: '5px 13px', cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', marginRight: 8, whiteSpace: 'nowrap' }}>
+                            ✦ Try V2
+                        </button>
+                    )}
+
                     {activeView !== 'home' && (
                     <div className="gh-search-wrap" ref={searchDropRef}>
                         <form className="gh-search" onSubmit={e => {
@@ -3088,6 +2778,13 @@ export default function App() {
                 </div>
                 )}
 
+                {/* ════ PORTFOLIO INTELLIGENCE VIEW ════ */}
+                {activeView === 'portfolio' && (
+                    <div style={{ minHeight: '80vh', background: 'var(--bg, #060b14)', paddingTop: 8 }}>
+                        <PortfolioIntelligence />
+                    </div>
+                )}
+
             </div>{/* /geo-main */}
 
             {/* ── BOTTOM BAR — Global Markets + Commodities ── */}
@@ -3147,6 +2844,7 @@ export default function App() {
                     { view: 'terminal', icon: '⊞', label: 'Terminal' },
                     { view: 'signals',  icon: '⊿', label: 'Signals' },
                     { view: 'hftmodel', icon: '◈', label: 'HFT' },
+                    { view: 'portfolio',icon: '◈', label: 'Portfolio' },
                 ].map(({ view, icon, label }) => (
                     <button key={view} className={activeView === view ? 'active' : ''} onClick={() => setActiveView(view)}>
                         <span className="mn-icon">{icon}</span>
