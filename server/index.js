@@ -25,6 +25,7 @@ const {
     normaliseTicker, getSector, analyseHolding, computeHealthScore,
     isMutualFundTicker, checkDataSufficiency, estimateRotationCost,
 } = require('./utils/portfolio');
+const { HB6115_META, HB6115_EQUITY, HB6115_MF, TICKER_TO_NS, ANALYST_TAGS } = require('./utils/hb6115Portfolio');
 const {
     NSE_FNO_LIQUID, NIFTY100_LIST, NSE_KEY_IDX, NSE_IDX_MAP,
     COUNTRY_INDICES, SECTOR_MAP, SIG_STOCKS, CLS_DRIVERS, FO_STOCKS, TRADER_EDGE,
@@ -1438,6 +1439,211 @@ app.post('/api/portfolio/rotation-cost', (req, res) => {
 
 // ── Test 16: F&O expiry info ─────────────────────────────────────────────────
 app.get('/api/expiry-info', (_req, res) => res.json(getDaysToExpiry()));
+
+// ── Portfolio auth (HB6115) ───────────────────────────────────────────────────
+app.post('/api/auth/portfolio', (req, res) => {
+    const { clientId, password } = req.body || {};
+    if (clientId === 'HB6115' && password === 'Astraeus@2026') {
+        return res.json({ ok: true, clientId: 'HB6115', name: 'HB Portfolio', token: 'hb6115-session-valid' });
+    }
+    res.status(401).json({ ok: false, error: 'Invalid credentials' });
+});
+
+// ── HB6115 portfolio data with live prices ────────────────────────────────────
+let hb6115Cache = null, hb6115CacheTs = 0;
+const HB6115_TTL = 60_000;
+
+app.get('/api/portfolio/hb6115', async (req, res) => {
+    const auth = req.headers['x-portfolio-token'];
+    if (auth !== 'hb6115-session-valid') return res.status(401).json({ error: 'Unauthorized' });
+
+    if (hb6115Cache && Date.now() - hb6115CacheTs < HB6115_TTL) return res.json(hb6115Cache);
+
+    try {
+        const nsTickers = HB6115_EQUITY.map(h => TICKER_TO_NS[h.ticker] || h.ticker + '.NS');
+        const quotes = await yahooFinance.quote(nsTickers).catch(() => []);
+        const qMap = {};
+        (Array.isArray(quotes) ? quotes : []).forEach(q => { if (q?.symbol) qMap[q.symbol] = q; });
+
+        // Enrich each holding with live price
+        const enriched = HB6115_EQUITY.map(h => {
+            const ns  = TICKER_TO_NS[h.ticker] || h.ticker + '.NS';
+            const q   = qMap[ns] || {};
+            const liveCmp     = q.regularMarketPrice || h.cmp;
+            const liveValue   = liveCmp * (h.qtyLT || h.qty);
+            const livePnl     = (liveCmp - h.avgBuy) * (h.qtyLT || h.qty);
+            const livePnlPct  = ((liveCmp - h.avgBuy) / h.avgBuy) * 100;
+            const tag         = ANALYST_TAGS[h.ticker] || { tag: 'HOLD', reason: 'No specific analyst note.' };
+            const isPledged   = (h.pledgedM + h.pledgedL) > 0;
+
+            return {
+                ...h,
+                ns,
+                liveCmp:       +liveCmp.toFixed(2),
+                liveValue:     +liveValue.toFixed(2),
+                livePnl:       +livePnl.toFixed(2),
+                livePnlPct:    +livePnlPct.toFixed(2),
+                change1d:      q.regularMarketChangePercent || 0,
+                volume:        q.regularMarketVolume || 0,
+                marketCap:     q.marketCap || null,
+                pe:            q.trailingPE || null,
+                week52High:    q.fiftyTwoWeekHigh || null,
+                week52Low:     q.fiftyTwoWeekLow  || null,
+                analystTag:    tag.tag,
+                analystReason: tag.reason,
+                isPledged,
+                pledgedTotal:  h.pledgedM + h.pledgedL,
+            };
+        });
+
+        // Live portfolio summary
+        const liveInvested     = enriched.reduce((s, h) => s + h.avgBuy * (h.qtyLT || h.qty), 0);
+        const livePresentValue = enriched.reduce((s, h) => s + h.liveValue, 0);
+        const livePnl          = livePresentValue - liveInvested;
+        const livePnlPct       = (livePnl / liveInvested) * 100;
+
+        const result = {
+            ...HB6115_META,
+            equity: enriched,
+            mf: HB6115_MF,
+            liveSummary: {
+                invested:     +liveInvested.toFixed(2),
+                presentValue: +livePresentValue.toFixed(2),
+                pnl:          +livePnl.toFixed(2),
+                pnlPct:       +livePnlPct.toFixed(2),
+            },
+            riskFlags: enriched.filter(h => h.isPledged || h.analystTag === 'CRITICAL_RISK'),
+            disclaimer: 'Analyst verdicts are algorithmic screener outputs for informational purposes only. Not SEBI-registered investment advice.',
+        };
+
+        hb6115Cache = result;
+        hb6115CacheTs = Date.now();
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Per-stock news + events for portfolio stocks ──────────────────────────────
+app.get('/api/portfolio/stock-detail', async (req, res) => {
+    const auth   = req.headers['x-portfolio-token'];
+    if (auth !== 'hb6115-session-valid') return res.status(401).json({ error: 'Unauthorized' });
+
+    const ticker = (req.query.ticker || '').toUpperCase().trim();
+    if (!ticker) return res.status(400).json({ error: 'ticker required' });
+
+    const ns = TICKER_TO_NS[ticker] || ticker + '.NS';
+    try {
+        const [searchRes, chartRes, quoteRes] = await Promise.allSettled([
+            yahooFinance.search(ns, { newsCount: 10 }).catch(() => ({ news: [] })),
+            yahooFinance.chart(ns, { interval: '1d', period1: toPeriod1('6mo') }).catch(() => ({ quotes: [] })),
+            yahooFinance.quote(ns).catch(() => ({})),
+        ]);
+
+        const searchData = searchRes.status === 'fulfilled' ? searchRes.value : { news: [] };
+        const chartData  = chartRes.status  === 'fulfilled' ? chartRes.value  : { quotes: [] };
+        const quoteData  = quoteRes.status  === 'fulfilled' ? quoteRes.value  : {};
+
+        // Process news with sentiment
+        const news = (searchData.news || []).slice(0, 8).map(n => {
+            const ts  = n.providerPublishTime instanceof Date
+                ? n.providerPublishTime.getTime()
+                : (n.providerPublishTime || 0) * 1000;
+            const ss  = sentScore(n.title || '', n.publisher);
+            return {
+                title:     n.title,
+                link:      n.link,
+                publisher: n.publisher,
+                time:      getRelativeTime(new Date(ts)),
+                sentiment: ss.sentiment,
+                score:     ss.score,
+            };
+        });
+
+        // Chart closes for 6-month performance
+        const closes = (chartData.quotes || []).filter(x => x?.close).map(x => x.close);
+        const dates  = (chartData.quotes || []).filter(x => x?.close).map(x =>
+            x.date instanceof Date ? x.date.toISOString().split('T')[0] : String(x.date).split('T')[0]
+        );
+
+        // RSI
+        let rsi = null;
+        if (closes.length >= 14) {
+            const rsiArr = RSI.calculate({ values: closes, period: 14 });
+            if (rsiArr.length) rsi = +rsiArr[rsiArr.length - 1].toFixed(1);
+        }
+
+        // 52-week performance
+        const high52 = quoteData.fiftyTwoWeekHigh;
+        const low52  = quoteData.fiftyTwoWeekLow;
+        const cmp    = quoteData.regularMarketPrice;
+        const pctFromHigh = cmp && high52 ? +((cmp / high52 - 1) * 100).toFixed(1) : null;
+        const pctFromLow  = cmp && low52  ? +((cmp / low52  - 1) * 100).toFixed(1) : null;
+
+        // Earnings / dividend info from quote
+        const earningsDate = quoteData.earningsTimestamp
+            ? new Date(quoteData.earningsTimestamp * 1000).toISOString().split('T')[0]
+            : quoteData.earningsTimestampStart
+            ? new Date(quoteData.earningsTimestampStart * 1000).toISOString().split('T')[0]
+            : null;
+
+        const dividendYield = quoteData.trailingAnnualDividendYield
+            ? +(quoteData.trailingAnnualDividendYield * 100).toFixed(2)
+            : null;
+
+        const analystTag = ANALYST_TAGS[ticker] || { tag: 'HOLD', reason: 'No specific note.' };
+
+        res.json({
+            ticker, ns,
+            cmp:          quoteData.regularMarketPrice,
+            change1d:     quoteData.regularMarketChangePercent,
+            pe:           quoteData.trailingPE,
+            pb:           quoteData.priceToBook,
+            roe:          quoteData.returnOnEquity ? +(quoteData.returnOnEquity * 100).toFixed(1) : null,
+            marketCap:    quoteData.marketCap,
+            high52, low52, pctFromHigh, pctFromLow,
+            rsi,
+            earningsDate,
+            dividendYield,
+            analystTag:    analystTag.tag,
+            analystReason: analystTag.reason,
+            news,
+            performance: { closes: closes.slice(-90), dates: dates.slice(-90) },
+            disclaimer: 'Data sourced from Yahoo Finance. Not SEBI-registered research.',
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Earnings calendar for all HB6115 stocks ───────────────────────────────────
+app.get('/api/portfolio/earnings', async (req, res) => {
+    const auth = req.headers['x-portfolio-token'];
+    if (auth !== 'hb6115-session-valid') return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+        const nsTickers = HB6115_EQUITY.map(h => TICKER_TO_NS[h.ticker] || h.ticker + '.NS');
+        const quotes = await yahooFinance.quote(nsTickers).catch(() => []);
+
+        const earnings = (Array.isArray(quotes) ? quotes : [])
+            .map(q => {
+                const ts = q.earningsTimestamp || q.earningsTimestampStart;
+                const date = ts ? new Date(ts * 1000).toISOString().split('T')[0] : null;
+                const daysAway = date ? Math.ceil((new Date(date) - Date.now()) / 86400000) : null;
+                if (!date) return null;
+                return {
+                    ticker:   q.symbol?.replace('.NS',''),
+                    ns:       q.symbol,
+                    date,
+                    daysAway,
+                    isUpcoming: daysAway !== null && daysAway >= 0 && daysAway <= 90,
+                    epsEst:   q.epsForwardAnnual || null,
+                    peForward:q.forwardPE || null,
+                };
+            })
+            .filter(Boolean)
+            .filter(e => e.isUpcoming)
+            .sort((a, b) => a.daysAway - b.daysAway);
+
+        res.json({ earnings, fetchedAt: new Date().toISOString() });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── Serve React build (production, non-Vercel only) ──────────────────────────
 // On Vercel the CDN serves dist/ directly; Express must not try to serve it
