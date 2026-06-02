@@ -1522,94 +1522,298 @@ app.get('/api/portfolio/hb6115', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Per-stock news + events for portfolio stocks ──────────────────────────────
+// ── Per-stock deep analysis (Financials + Technicals + Sentiment + Earnings) ──
+const stockDetailCache = {};
+const STOCK_DETAIL_TTL = 5 * 60_000;
+
 app.get('/api/portfolio/stock-detail', async (req, res) => {
     const auth   = req.headers['x-portfolio-token'];
     if (auth !== 'hb6115-session-valid') return res.status(401).json({ error: 'Unauthorized' });
 
     const ticker = (req.query.ticker || '').toUpperCase().trim();
     if (!ticker) return res.status(400).json({ error: 'ticker required' });
-
     const ns = TICKER_TO_NS[ticker] || ticker + '.NS';
+
+    if (stockDetailCache[ticker] && Date.now() - stockDetailCache[ticker].ts < STOCK_DETAIL_TTL) {
+        return res.json(stockDetailCache[ticker].data);
+    }
+
     try {
-        const [searchRes, chartRes, quoteRes] = await Promise.allSettled([
+        const [summaryRes, chartRes, searchRes] = await Promise.allSettled([
+            yahooFinance.quoteSummary(ns, {
+                modules: ['financialData','defaultKeyStatistics','summaryDetail','recommendationTrend','earnings','earningsHistory'],
+            }).catch(() => ({})),
+            yahooFinance.chart(ns, { interval: '1d', period1: toPeriod1('1y') }).catch(() => ({ quotes: [] })),
             yahooFinance.search(ns, { newsCount: 10 }).catch(() => ({ news: [] })),
-            yahooFinance.chart(ns, { interval: '1d', period1: toPeriod1('6mo') }).catch(() => ({ quotes: [] })),
-            yahooFinance.quote(ns).catch(() => ({})),
         ]);
 
-        const searchData = searchRes.status === 'fulfilled' ? searchRes.value : { news: [] };
-        const chartData  = chartRes.status  === 'fulfilled' ? chartRes.value  : { quotes: [] };
-        const quoteData  = quoteRes.status  === 'fulfilled' ? quoteRes.value  : {};
+        const summary  = summaryRes.status  === 'fulfilled' ? summaryRes.value  : {};
+        const chartRaw = chartRes.status    === 'fulfilled' ? chartRes.value    : { quotes: [] };
+        const srch     = searchRes.status   === 'fulfilled' ? searchRes.value   : { news: [] };
 
-        // Process news with sentiment
-        const news = (searchData.news || []).slice(0, 8).map(n => {
-            const ts  = n.providerPublishTime instanceof Date
-                ? n.providerPublishTime.getTime()
-                : (n.providerPublishTime || 0) * 1000;
-            const ss  = sentScore(n.title || '', n.publisher);
-            return {
-                title:     n.title,
-                link:      n.link,
-                publisher: n.publisher,
-                time:      getRelativeTime(new Date(ts)),
-                sentiment: ss.sentiment,
-                score:     ss.score,
-            };
-        });
+        const fd  = summary.financialData         || {};
+        const dk  = summary.defaultKeyStatistics  || {};
+        const sd  = summary.summaryDetail          || {};
+        const rt  = summary.recommendationTrend   || {};
+        const er  = summary.earnings              || {};
+        const eh  = summary.earningsHistory       || {};
 
-        // Chart closes for 6-month performance
-        const closes = (chartData.quotes || []).filter(x => x?.close).map(x => x.close);
-        const dates  = (chartData.quotes || []).filter(x => x?.close).map(x =>
-            x.date instanceof Date ? x.date.toISOString().split('T')[0] : String(x.date).split('T')[0]
-        );
+        // ── Technicals ─────────────────────────────────────────────────────
+        const chartQuotes = (chartRaw.quotes || []).filter(x => x?.close);
+        const closes  = chartQuotes.map(x => x.close);
+        const volumes = chartQuotes.map(x => x.volume || 0);
+        const highs   = chartQuotes.map(x => x.high   || x.close);
+        const lows    = chartQuotes.map(x => x.low    || x.close);
 
-        // RSI
+        const last = closes[closes.length - 1] || 0;
+
+        // RSI 14
         let rsi = null;
         if (closes.length >= 14) {
             const rsiArr = RSI.calculate({ values: closes, period: 14 });
             if (rsiArr.length) rsi = +rsiArr[rsiArr.length - 1].toFixed(1);
         }
 
-        // 52-week performance
-        const high52 = quoteData.fiftyTwoWeekHigh;
-        const low52  = quoteData.fiftyTwoWeekLow;
-        const cmp    = quoteData.regularMarketPrice;
-        const pctFromHigh = cmp && high52 ? +((cmp / high52 - 1) * 100).toFixed(1) : null;
-        const pctFromLow  = cmp && low52  ? +((cmp / low52  - 1) * 100).toFixed(1) : null;
+        // MACD (12,26,9)
+        let macdSignal = 'NEUTRAL', macdHist = null;
+        if (closes.length >= 35) {
+            const macdArr = MACD.calculate({ values: closes, fastPeriod:12, slowPeriod:26, signalPeriod:9, SimpleMAOscillator:false, SimpleMASignal:false });
+            if (macdArr.length >= 2) {
+                const cur = macdArr[macdArr.length - 1], prev = macdArr[macdArr.length - 2];
+                macdHist = cur.histogram;
+                if (cur.histogram > 0 && prev.histogram <= 0) macdSignal = 'BULLISH_CROSS';
+                else if (cur.histogram < 0 && prev.histogram >= 0) macdSignal = 'BEARISH_CROSS';
+                else if (cur.histogram > 0) macdSignal = 'BULLISH';
+                else if (cur.histogram < 0) macdSignal = 'BEARISH';
+            }
+        }
 
-        // Earnings / dividend info from quote
-        const earningsDate = quoteData.earningsTimestamp
-            ? new Date(quoteData.earningsTimestamp * 1000).toISOString().split('T')[0]
-            : quoteData.earningsTimestampStart
-            ? new Date(quoteData.earningsTimestampStart * 1000).toISOString().split('T')[0]
-            : null;
+        // EMAs
+        const calcEMA = (period) => {
+            if (closes.length < period) return null;
+            const arr = EMA.calculate({ values: closes, period });
+            return arr.length ? +arr[arr.length - 1].toFixed(2) : null;
+        };
+        const ema9   = calcEMA(9);
+        const ema21  = calcEMA(21);
+        const ema50  = calcEMA(50);
+        const ema200 = calcEMA(200);
 
-        const dividendYield = quoteData.trailingAnnualDividendYield
-            ? +(quoteData.trailingAnnualDividendYield * 100).toFixed(2)
-            : null;
+        // Volume signal
+        const vol20 = volumes.slice(-20).reduce((s,v)=>s+v,0)/20;
+        const vol3  = volumes.slice(-3).reduce((s,v)=>s+v,0)/3;
+        const volRatio = vol20 > 0 ? +(vol3/vol20).toFixed(2) : null;
+        const volSignal = volRatio > 1.5 ? 'HIGH' : volRatio > 0.8 ? 'NORMAL' : 'LOW';
 
-        const analystTag = ANALYST_TAGS[ticker] || { tag: 'HOLD', reason: 'No specific note.' };
+        // Support / Resistance (20-session swing)
+        const recent20H = highs.slice(-20), recent20L = lows.slice(-20);
+        const support    = recent20L.length ? +Math.min(...recent20L).toFixed(2) : null;
+        const resistance = recent20H.length ? +Math.max(...recent20H).toFixed(2) : null;
 
-        res.json({
+        // Overall trend signal
+        let trendSignal = 'NEUTRAL';
+        if (ema50 && ema200) {
+            if (last > ema50 && last > ema200 && ema50 > ema200) trendSignal = 'STRONG_BULL';
+            else if (last > ema50 && last > ema200)               trendSignal = 'BULLISH';
+            else if (last < ema50 && last < ema200 && ema50 < ema200) trendSignal = 'STRONG_BEAR';
+            else if (last < ema50 && last < ema200)               trendSignal = 'BEARISH';
+        } else if (ema50) {
+            trendSignal = last > ema50 ? 'BULLISH' : 'BEARISH';
+        }
+
+        // Technical verdict
+        let techScore = 0;
+        if (rsi && rsi < 35)      techScore += 2;
+        else if (rsi && rsi > 65) techScore -= 2;
+        if (macdSignal.includes('BULL')) techScore += 1;
+        if (macdSignal.includes('BEAR')) techScore -= 1;
+        if (trendSignal.includes('BULL')) techScore += 1;
+        if (trendSignal.includes('BEAR')) techScore -= 1;
+        const techVerdict = techScore >= 3 ? 'STRONG BUY' : techScore >= 1 ? 'BUY' : techScore <= -3 ? 'STRONG SELL' : techScore <= -1 ? 'SELL' : 'NEUTRAL';
+
+        // ── Financials ─────────────────────────────────────────────────────
+        const pct = (v) => v != null ? +(v * 100).toFixed(1) : null;
+        const n2  = (v) => v != null ? +v.toFixed(2) : null;
+
+        const financials = {
+            totalRevenue:     fd.totalRevenue     || null,
+            revenueGrowth:    pct(fd.revenueGrowth),
+            grossMargins:     pct(fd.grossMargins),
+            ebitdaMargins:    pct(fd.ebitdaMargins),
+            operatingMargins: pct(fd.operatingMargins),
+            profitMargins:    pct(dk.profitMargins),
+            returnOnEquity:   pct(fd.returnOnEquity),
+            returnOnAssets:   pct(fd.returnOnAssets),
+            debtToEquity:     fd.debtToEquity != null ? n2(fd.debtToEquity / 100) : null,
+            currentRatio:     n2(fd.currentRatio),
+            freeCashflow:     fd.freeCashflow || null,
+            trailingPE:       n2(sd.trailingPE),
+            forwardPE:        n2(dk.forwardPE || sd.forwardPE),
+            priceToBook:      n2(dk.priceToBook),
+            enterpriseToEbitda: n2(dk.enterpriseToEbitda),
+            beta:             n2(dk.beta || sd.beta),
+            trailingEps:      n2(dk.trailingEps),
+            forwardEps:       n2(dk.forwardEps),
+            dividendYield:    sd.dividendYield != null ? pct(sd.dividendYield) : null,
+            high52:           sd.fiftyTwoWeekHigh || null,
+            low52:            sd.fiftyTwoWeekLow  || null,
+            targetMean:       fd.targetMeanPrice  || null,
+            targetHigh:       fd.targetHighPrice  || null,
+            targetLow:        fd.targetLowPrice   || null,
+            analystCount:     fd.numberOfAnalystOpinions || null,
+            marketCap:        dk.enterpriseValue  || null,
+        };
+        const cmp = sd.regularMarketPreviousClose || last;
+        financials.pctFromHigh = financials.high52 && cmp ? +((cmp/financials.high52-1)*100).toFixed(1) : null;
+        financials.upsideToTarget = financials.targetMean && cmp ? +((financials.targetMean/cmp-1)*100).toFixed(1) : null;
+
+        // ── Analyst consensus ──────────────────────────────────────────────
+        const trend0 = (rt.trend || [])[0] || {};
+        const consensus = {
+            strongBuy:  trend0.strongBuy  || 0,
+            buy:        trend0.buy        || 0,
+            hold:       trend0.hold       || 0,
+            sell:       trend0.sell       || 0,
+            strongSell: trend0.strongSell || 0,
+        };
+        consensus.totalBull = consensus.strongBuy + consensus.buy;
+        consensus.totalBear = consensus.sell + consensus.strongSell;
+        consensus.total     = consensus.totalBull + consensus.hold + consensus.totalBear;
+        consensus.rating    = consensus.totalBull > consensus.totalBear ? 'BUY' : consensus.totalBear > consensus.totalBull ? 'SELL' : 'HOLD';
+
+        // ── Quarterly earnings history ──────────────────────────────────────
+        const quarterly = (eh.history || er.earningsChart?.quarterly || [])
+            .slice(0, 4)
+            .map(q => ({
+                quarter:     q.quarter ? new Date(q.quarter).toISOString().slice(0,7) : q.date,
+                epsActual:   q.epsActual   != null ? +q.epsActual.toFixed(2)   : null,
+                epsEstimate: q.epsEstimate != null ? +q.epsEstimate.toFixed(2) : null,
+                surprise:    q.surprisePercent != null ? +(q.surprisePercent * 100).toFixed(1) : null,
+            }))
+            .reverse();
+
+        // ── News with sentiment ────────────────────────────────────────────
+        const news = (srch.news || []).slice(0, 8).map(n => {
+            const ts = n.providerPublishTime instanceof Date
+                ? n.providerPublishTime.getTime()
+                : (n.providerPublishTime || 0) * 1000;
+            const ss = sentScore(n.title || '', n.publisher);
+            return { title:n.title, link:n.link, publisher:n.publisher, time:getRelativeTime(new Date(ts)), sentiment:ss.sentiment, score:ss.score };
+        });
+
+        const bullNews = news.filter(n => n.sentiment?.includes('bull')).length;
+        const bearNews = news.filter(n => n.sentiment?.includes('bear')).length;
+        const newsSentiment = bullNews > bearNews ? 'BULLISH' : bearNews > bullNews ? 'BEARISH' : 'NEUTRAL';
+        const newsScore = news.reduce((s,n)=>s+n.score,0);
+
+        // ── Analyst note ──────────────────────────────────────────────────
+        const analystTag = ANALYST_TAGS[ticker] || { tag:'HOLD', reason:'No specific analyst note for this ticker.' };
+
+        // Next earnings date
+        const earningsTs = sd.earningsTimestamp || sd.earningsTimestampStart;
+        const nextEarnings = earningsTs ? new Date(earningsTs*1000).toISOString().split('T')[0] : null;
+        const daysToEarnings = nextEarnings ? Math.ceil((new Date(nextEarnings)-Date.now())/86400000) : null;
+
+        const data = {
             ticker, ns,
-            cmp:          quoteData.regularMarketPrice,
-            change1d:     quoteData.regularMarketChangePercent,
-            pe:           quoteData.trailingPE,
-            pb:           quoteData.priceToBook,
-            roe:          quoteData.returnOnEquity ? +(quoteData.returnOnEquity * 100).toFixed(1) : null,
-            marketCap:    quoteData.marketCap,
-            high52, low52, pctFromHigh, pctFromLow,
-            rsi,
-            earningsDate,
-            dividendYield,
+            financials,
+            technicals: { rsi, macdSignal, macdHist:n2(macdHist), ema9, ema21, ema50, ema200, trendSignal, volRatio, volSignal, support, resistance, techVerdict },
+            consensus,
+            quarterly,
+            news, bullNews, bearNews, newsSentiment, newsScore,
+            nextEarnings, daysToEarnings,
             analystTag:    analystTag.tag,
             analystReason: analystTag.reason,
-            news,
-            performance: { closes: closes.slice(-90), dates: dates.slice(-90) },
-            disclaimer: 'Data sourced from Yahoo Finance. Not SEBI-registered research.',
-        });
+            disclaimer: 'Data: Yahoo Finance. Not SEBI-registered investment research.',
+        };
+
+        stockDetailCache[ticker] = { data, ts: Date.now() };
+        res.json(data);
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Market Pulse — India + Global macro snapshot ─────────────────────────────
+let pulseCacheData = null, pulseCacheTs = 0;
+const PULSE_TTL = 3 * 60_000;
+
+app.get('/api/market/pulse', async (req, res) => {
+    if (pulseCacheData && Date.now() - pulseCacheTs < PULSE_TTL) return res.json(pulseCacheData);
+    try {
+        const INDIA_SYMS  = ['^NSEI','^NSEBANK','^INDIAVIX','^CNXMIDCAP','USDINR=X','^INBMK10Y'];
+        const GLOBAL_SYMS = ['^GSPC','^IXIC','^DJI','CL=F','GC=F','DX-Y.NYB','^TNX'];
+
+        const [inRes, glRes, nseRes, newsRes] = await Promise.allSettled([
+            yahooFinance.quote(INDIA_SYMS).catch(()=>[]),
+            yahooFinance.quote(GLOBAL_SYMS).catch(()=>[]),
+            getNSEIndices().catch(()=>[]),
+            fetch(`http://localhost:${process.env.PORT||3000}/api/globalnews`).then(r=>r.json()).catch(()=>[]),
+        ]);
+
+        const indiaQ  = inRes.status  === 'fulfilled' ? (Array.isArray(inRes.value)  ? inRes.value  : []) : [];
+        const globalQ = glRes.status  === 'fulfilled' ? (Array.isArray(glRes.value)  ? glRes.value  : []) : [];
+        const nseIdxs = nseRes.status === 'fulfilled' ? (Array.isArray(nseRes.value) ? nseRes.value : []) : [];
+        const allNews = newsRes.status=== 'fulfilled' ? (Array.isArray(newsRes.value)? newsRes.value : []) : [];
+
+        const qm = {}; [...indiaQ,...globalQ].forEach(q=>{ if(q?.symbol) qm[q.symbol]=q; });
+
+        const qv = (sym, field='regularMarketPrice') => qm[sym]?.[field] ?? null;
+        const qp = (sym) => qm[sym]?.regularMarketChangePercent ?? null;
+
+        // NSE FII/DII (from indices if available, otherwise N/A)
+        const niftyIdx = nseIdxs.find(x=>(x.index||x.indexSymbol)==='NIFTY 50');
+        const vixNSE   = nseIdxs.find(x=>(x.index||x.indexSymbol)==='INDIA VIX');
+
+        // Sector sentiment from news
+        const sectorCounts = {};
+        allNews.forEach(n => {
+            const ss = sentScore(n.title||'', n.publisher);
+            (n.sectors||[]).forEach(s => {
+                if (!sectorCounts[s]) sectorCounts[s] = { bull:0, bear:0, neutral:0, score:0 };
+                if (ss.sentiment?.includes('bull')) sectorCounts[s].bull++;
+                else if (ss.sentiment?.includes('bear')) sectorCounts[s].bear++;
+                else sectorCounts[s].neutral++;
+                sectorCounts[s].score += ss.score;
+            });
+        });
+        const sectorSentiment = Object.entries(sectorCounts)
+            .filter(([k])=>k!=='Broad Market')
+            .map(([sector,v])=>({ sector, ...v, signal: v.bull>v.bear?'BULLISH':v.bear>v.bull?'BEARISH':'NEUTRAL' }))
+            .sort((a,b)=>b.score-a.score);
+
+        // HB6115 portfolio macro exposure map
+        const portfolioMacroExposure = {
+            'Rate Sensitive (RBI cuts)':   ['AXISBANK','BAJAJFINSV','HDFCBANK','JIOFIN','KOTAKBANK','LICI','SBIN','JKCEMENT'],
+            'Crude/Commodity linked':      ['GAIL','ONGC','RELIANCE','NMDC','JSWSTEEL','TATASTEEL','HINDALCO','SAIL'],
+            'USD/INR sensitive (exporters)':['COFORGE','LTM','ETERNAL','NAUKRI'],
+            'Domestic capex theme':        ['BHEL','POLYCAB','NTPC','TATAPOWER','PARAS','Dixon'],
+        };
+
+        const data = {
+            india: {
+                nifty50:   { price: qv('^NSEI'),     change: qp('^NSEI'),     name:'NIFTY 50'     },
+                bankNifty: { price: qv('^NSEBANK'),  change: qp('^NSEBANK'),  name:'NIFTY BANK'   },
+                vix:       { price: qv('^INDIAVIX') || vixNSE?.last, change: qp('^INDIAVIX'), name:'INDIA VIX' },
+                midcap:    { price: qv('^CNXMIDCAP'), change: qp('^CNXMIDCAP'), name:'MIDCAP 100' },
+                usdinr:    { price: qv('USDINR=X'),  change: qp('USDINR=X'),  name:'USD/INR'      },
+                gsec10y:   { price: qv('^INBMK10Y'), change: qp('^INBMK10Y'), name:'10Y GSEC'     },
+            },
+            global: {
+                sp500:  { price: qv('^GSPC'),     change: qp('^GSPC'),     name:'S&P 500'    },
+                nasdaq: { price: qv('^IXIC'),     change: qp('^IXIC'),     name:'NASDAQ'     },
+                dow:    { price: qv('^DJI'),      change: qp('^DJI'),      name:'DOW JONES'  },
+                crude:  { price: qv('CL=F'),      change: qp('CL=F'),      name:'CRUDE OIL'  },
+                gold:   { price: qv('GC=F'),      change: qp('GC=F'),      name:'GOLD'       },
+                dxy:    { price: qv('DX-Y.NYB'),  change: qp('DX-Y.NYB'),  name:'DXY'        },
+                us10y:  { price: qv('^TNX'),      change: qp('^TNX'),      name:'US 10Y'     },
+            },
+            sectorSentiment: sectorSentiment.slice(0, 10),
+            portfolioMacroExposure,
+            fetchedAt: new Date().toISOString(),
+        };
+
+        pulseCacheData = data; pulseCacheTs = Date.now();
+        res.json(data);
+    } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Earnings calendar for all HB6115 stocks ───────────────────────────────────
