@@ -1544,7 +1544,14 @@ app.get('/api/portfolio/stock-detail', async (req, res) => {
                 modules: ['financialData','defaultKeyStatistics','summaryDetail','recommendationTrend','earnings','earningsHistory'],
             }).catch(() => ({})),
             yahooFinance.chart(ns, { interval: '1d', period1: toPeriod1('1y') }).catch(() => ({ quotes: [] })),
-            yahooFinance.search(ns, { newsCount: 10 }).catch(() => ({ news: [] })),
+            // Yahoo Finance news: base ticker (e.g. RELIANCE) returns more results than RELIANCE.NS
+            // Fallback to RSS-augmented search if primary returns 0
+            (async () => {
+                const r1 = await yahooFinance.search(ticker, { newsCount: 10 }).catch(() => ({ news: [] }));
+                if (r1.news?.length > 0) return r1;
+                // Fallback: try the full NS symbol
+                return yahooFinance.search(ns, { newsCount: 10 }).catch(() => ({ news: [] }));
+            })(),
         ]);
 
         const summary  = summaryRes.status  === 'fulfilled' ? summaryRes.value  : {};

@@ -12,7 +12,13 @@
     "lint": "eslint src server --ext .js,.jsx",
     "test": "echo \"No tests configured\" && exit 0"
   },
-  "keywords": ["nifty", "options", "pcr", "india", "trading"],
+  "keywords": [
+    "nifty",
+    "options",
+    "pcr",
+    "india",
+    "trading"
+  ],
   "author": "ProTrader",
   "license": "ISC",
   "type": "commonjs",
@@ -32,7 +38,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "technicalindicators": "^3.1.0",
-    "yahoo-finance2": "^3.13.2"
+    "yahoo-finance2": "^3.15.2"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.1.4",
